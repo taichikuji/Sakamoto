@@ -200,7 +200,7 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
         }
 
         new_channel = await guild.create_voice_channel(
-            name=f"{member.display_name}'s Lobby",
+            name=f"⏲️ {member.display_name}'s lobby",
             category=generator.category,
             overwrites=overwrites,
             reason=f"Dynamic channel for {member.display_name}",
