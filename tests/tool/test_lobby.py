@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiosqlite import connect
+from discord import PermissionOverwrite
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -30,20 +31,21 @@ class DummyBot:
 
 
 class DummyVoiceChannel:
-    def __init__(self):
+    def __init__(self, overwrites=None):
         self.last_role = None
         self.last_overwrite = None
         self.last_name = None
-        self._overwrite = SimpleNamespace(connect=None)
+        self.overwrites = overwrites or {}
         self.set_permissions = AsyncMock(side_effect=self._set_permissions)
         self.edit = AsyncMock(side_effect=self._edit)
 
-    def overwrites_for(self, _role):
-        return self._overwrite
+    def overwrites_for(self, role):
+        return self.overwrites.setdefault(role, PermissionOverwrite())
 
     async def _set_permissions(self, role, overwrite):
         self.last_role = role
         self.last_overwrite = overwrite
+        self.overwrites[role] = overwrite
 
     async def _edit(self, name):
         self.last_name = name
@@ -82,9 +84,17 @@ async def test_voice_control_interaction_check_rejects_non_owner():
 
 @pytest.mark.asyncio
 async def test_voice_control_lock_and_unlock_toggle_permissions_and_buttons():
-    channel = DummyVoiceChannel()
     owner = object()
-    guild = SimpleNamespace(default_role=object())
+    default_role = object()
+    allowed_role = object()
+    channel = DummyVoiceChannel(
+        {
+            default_role: PermissionOverwrite(),
+            allowed_role: PermissionOverwrite(connect=True),
+            owner: PermissionOverwrite(connect=True),
+        }
+    )
+    guild = SimpleNamespace(default_role=default_role)
     view = VoiceControlView(channel, owner)
     interaction = _make_interaction(user=owner, guild=guild)
 
@@ -95,14 +105,18 @@ async def test_voice_control_lock_and_unlock_toggle_permissions_and_buttons():
 
     assert lock_button.disabled is True
     assert unlock_button.disabled is False
-    assert channel.last_overwrite.connect is False
+    assert channel.overwrites[default_role].connect is False
+    assert channel.overwrites[allowed_role].connect is False
+    assert channel.overwrites[owner].connect is True
     interaction.followup.send.assert_awaited_with(":lock: Channel locked.", ephemeral=True)
 
     await unlock_button.callback(interaction)
 
     assert lock_button.disabled is False
     assert unlock_button.disabled is True
-    assert channel.last_overwrite.connect is None
+    assert channel.overwrites[default_role].connect is None
+    assert channel.overwrites[allowed_role].connect is True
+    assert channel.overwrites[owner].connect is True
     interaction.followup.send.assert_awaited_with(
         ":unlock: Channel unlocked.", ephemeral=True
     )
@@ -172,6 +186,55 @@ async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
         async with db.execute("SELECT channel_id FROM lobby_active ORDER BY channel_id") as cursor:
             rows = await cursor.fetchall()
     assert rows == [(22,)]
+
+
+@pytest.mark.asyncio
+async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    await cog._init_db()
+
+    class DummyMember:
+        display_name = "Owner"
+        mention = "@Owner"
+
+        def __init__(self, guild):
+            self.guild = guild
+            self.move_to = AsyncMock()
+
+    default_role = object()
+    allowed_role = object()
+    new_channel = SimpleNamespace(id=303, send=AsyncMock(), delete=AsyncMock())
+    guild = SimpleNamespace(
+        default_role=default_role,
+        create_voice_channel=AsyncMock(return_value=new_channel),
+    )
+    member = DummyMember(guild)
+    generator = SimpleNamespace(
+        category=object(),
+        overwrites={
+            default_role: PermissionOverwrite(
+                view_channel=False, connect=False
+            ),
+            allowed_role: PermissionOverwrite(
+                view_channel=True, connect=True, speak=False
+            ),
+            member: PermissionOverwrite(speak=False),
+        },
+    )
+
+    await cog._create_lobby(member, generator)
+
+    overwrites = guild.create_voice_channel.await_args.kwargs["overwrites"]
+    assert overwrites[default_role].view_channel is False
+    assert overwrites[default_role].connect is False
+    assert overwrites[allowed_role].view_channel is True
+    assert overwrites[allowed_role].connect is True
+    assert overwrites[allowed_role].speak is False
+    assert overwrites[member].speak is False
+    assert overwrites[member].connect is True
+    assert overwrites[member].move_members is True
+    assert overwrites[member].manage_channels is True
 
 
 @pytest.mark.asyncio
