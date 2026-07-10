@@ -145,6 +145,25 @@ async def test_play_song_starts_playback_and_tracks_current_song(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_play_song_cleans_source_when_playback_is_rejected(monkeypatch):
+    source = SimpleNamespace(cleanup=MagicMock())
+    vc = DummyVoiceClient(connected=True)
+    vc.play.side_effect = RuntimeError("rejected")
+    cog = AudioEngine(_make_bot())
+    cog.voice_clients[1] = vc
+    cog.play_next = MagicMock()
+    monkeypatch.setattr(
+        "functions.tool._audio_engine.FFmpegPCMAudio",
+        lambda *_args, **_kwargs: source,
+    )
+
+    started = await cog.play_song(1, "source", "stream", "Track", "3:00")
+
+    assert started is False
+    source.cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_ensure_user_in_same_voice_channel_rejects_other_channel(monkeypatch):
     cog = AudioEngine(_make_bot())
     bot_channel = object()
@@ -469,6 +488,22 @@ async def test_play_connects_before_enqueue(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_play_does_not_connect_when_source_lookup_fails(monkeypatch):
+    voice_channel = DummyVoiceChannel()
+    interaction = _make_interaction(
+        user=DummyMember(42, voice_channel=voice_channel), guild_id=1
+    )
+    cog = MusicCog(_make_bot())
+    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("functions.tool.music.get_running_loop", lambda: DummyLoop(None))
+
+    await MusicCog.play.callback(cog, interaction, query="missing")
+
+    voice_channel.connect.assert_not_awaited()
+    assert cog.engine.command_channels == {}
+
+
+@pytest.mark.asyncio
 async def test_play_query_autocomplete_returns_distinct_choices(monkeypatch):
     cog = MusicCog(_make_bot())
     monkeypatch.setattr(
@@ -665,6 +700,18 @@ async def test_disconnect_and_cleanup_clears_all_state():
     assert cog.queues == {}
     assert cog.currently_playing == {}
     assert cog.command_channels == {}
+
+
+@pytest.mark.asyncio
+async def test_disconnect_and_cleanup_stops_disconnected_player():
+    vc = DummyVoiceClient(connected=False, playing=True)
+    cog = AudioEngine(_make_bot())
+    cog.voice_clients[1] = vc
+
+    await cog.disconnect_and_cleanup(1)
+
+    vc.stop.assert_called_once()
+    vc.disconnect.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -87,13 +87,10 @@ class MusicCog(commands.Cog):
             return
 
         await interaction.response.defer()
-        if await self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction) is None:
-            return
         channel = interaction.channel
         if channel is None or not hasattr(channel, "send"):
             await interaction.followup.send(":x: This command must be used in a text channel.", ephemeral=True)
             return
-        self.engine.command_channels[guild_id] = channel
 
         try:
             info = await get_running_loop().run_in_executor(None, self.search_source, query)
@@ -110,6 +107,9 @@ class MusicCog(commands.Cog):
             await interaction.followup.send(f":x: Failed to retrieve video. Error: {e}", ephemeral=True)
             return
 
+        if await self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction) is None:
+            return
+        self.engine.command_channels[guild_id] = channel
         title = info.get("title", "Unknown Title")
         duration = info.get("duration_string", "N/A")
         await self.engine.enqueue_or_play(
