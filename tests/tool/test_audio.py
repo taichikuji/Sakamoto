@@ -33,6 +33,16 @@ def test_play_option_contracts():
     ]
 
 
+@pytest.mark.asyncio
+async def test_music_commands_require_guild():
+    interaction = _make_interaction(user=object(), guild_id=None)
+
+    assert await MusicCog(_make_bot()).interaction_check(interaction) is False
+    interaction.response.send_message.assert_awaited_once_with(
+        ":x: Could not determine guild ID.", ephemeral=True
+    )
+
+
 class DummyMember:
     def __init__(self, user_id: int, *, voice_channel=None):
         self.id = user_id
@@ -462,34 +472,41 @@ async def test_radio_balloon_uses_random_station_path(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_play_connects_before_enqueue(monkeypatch):
+    events = []
     connected_client = DummyVoiceClient(connected=True)
     voice_channel = DummyVoiceChannel(connected_client=connected_client)
+    voice_channel.connect.side_effect = lambda **_kwargs: events.append("connect") or connected_client
     interaction = _make_interaction(user=DummyMember(42, voice_channel=voice_channel), guild_id=1)
     cog = MusicCog(_make_bot())
     cog.engine.enqueue_or_play = AsyncMock()
     monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+
+    async def lookup(_executor, _fn, _arg):
+        events.append("lookup")
+        return {
+            "url": "https://stream.test/live",
+            "webpage_url": "https://youtube.test/watch?v=abc",
+            "title": "Track",
+            "duration_string": "3:00",
+        }
+
     monkeypatch.setattr(
         "functions.tool.music.get_running_loop",
-        lambda: DummyLoop(
-            {
-                "url": "https://stream.test/live",
-                "webpage_url": "https://youtube.test/watch?v=abc",
-                "title": "Track",
-                "duration_string": "3:00",
-            }
-        ),
+        lambda: SimpleNamespace(run_in_executor=lookup),
     )
 
     await MusicCog.play.callback(cog, interaction, query="track")
 
+    assert events == ["connect", "lookup"]
     voice_channel.connect.assert_awaited_once()
     assert cog.engine.voice_clients[1] is connected_client
     cog.engine.enqueue_or_play.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_play_does_not_connect_when_source_lookup_fails(monkeypatch):
-    voice_channel = DummyVoiceChannel()
+async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
+    connected_client = DummyVoiceClient(connected=True)
+    voice_channel = DummyVoiceChannel(connected_client=connected_client)
     interaction = _make_interaction(
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
     )
@@ -499,8 +516,31 @@ async def test_play_does_not_connect_when_source_lookup_fails(monkeypatch):
 
     await MusicCog.play.callback(cog, interaction, query="missing")
 
-    voice_channel.connect.assert_not_awaited()
+    voice_channel.connect.assert_awaited_once()
+    connected_client.stop.assert_called_once()
+    connected_client.disconnect.assert_awaited_once()
+    assert cog.engine.voice_clients == {}
     assert cog.engine.command_channels == {}
+
+
+@pytest.mark.asyncio
+async def test_play_keeps_existing_connection_when_source_lookup_fails(monkeypatch):
+    connected_client = DummyVoiceClient(connected=True, playing=True)
+    voice_channel = DummyVoiceChannel()
+    interaction = _make_interaction(
+        user=DummyMember(42, voice_channel=voice_channel), guild_id=1
+    )
+    cog = MusicCog(_make_bot())
+    cog.engine.voice_clients[1] = connected_client
+    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("functions.tool.music.get_running_loop", lambda: DummyLoop(None))
+
+    await MusicCog.play.callback(cog, interaction, query="missing")
+
+    voice_channel.connect.assert_not_awaited()
+    connected_client.stop.assert_not_called()
+    connected_client.disconnect.assert_not_awaited()
+    assert cog.engine.voice_clients[1] is connected_client
 
 
 @pytest.mark.asyncio
@@ -554,6 +594,20 @@ async def test_play_query_autocomplete_limits_to_five_choices(monkeypatch):
     choices = await cog.play_query_autocomplete(SimpleNamespace(), "track")
 
     assert len(choices) == 5
+
+
+def test_search_source_returns_first_entry(monkeypatch):
+    ydl = MagicMock()
+    ydl.__enter__.return_value.extract_info.side_effect = [
+        {"entries": [{"url": "https://stream.test/live"}]},
+        {"entries": []},
+    ]
+    monkeypatch.setattr("functions.tool.music.YoutubeDL", MagicMock(return_value=ydl))
+    cog = MusicCog(_make_bot())
+
+    assert cog.search_source("track") == {"url": "https://stream.test/live"}
+    with pytest.raises(ValueError, match="No results found"):
+        cog.search_source("missing")
 
 
 @pytest.mark.asyncio

@@ -25,11 +25,15 @@ class MusicCog(commands.Cog):
             "noplaylist": True,
             "quiet": True,
             "nocheckcertificate": True,
-            "ignoreerrors": False,
             "no_warnings": True,
             "source_address": "0.0.0.0",
-            "extract_flat": False,
         }
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.guild_id is not None:
+            return True
+        await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
+        return False
 
     async def play_query_autocomplete(self, _interaction: Interaction, current: str) -> list[app_commands.Choice[str]]:
         query = current.strip()
@@ -52,14 +56,8 @@ class MusicCog(commands.Cog):
                 continue
             title = str(entry.get("title") or "Unknown Title").strip()
             value = str(entry.get("webpage_url") or "").strip()
-            if not value:
-                fallback = str(entry.get("url") or "").strip()
-                if fallback and "://" in fallback:
-                    value = fallback
-                elif fallback:
-                    value = f"https://www.youtube.com/watch?v={fallback}"
-            if not value:
-                value = title
+            fallback = str(entry.get("url") or "").strip()
+            value = value or (fallback if "://" in fallback else f"https://www.youtube.com/watch?v={fallback}" if fallback else title)
             if len(value) > 100:
                 value = title[:100].strip()
             if not value or value in seen_values:
@@ -76,9 +74,7 @@ class MusicCog(commands.Cog):
         if not query:
             await interaction.response.send_message(":x: You must provide a search term or URL.", ephemeral=True)
             return
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if not isinstance(user := interaction.user, Member):
             await interaction.response.send_message(":x: This command can only be used in a server.", ephemeral=True)
             return
@@ -92,23 +88,24 @@ class MusicCog(commands.Cog):
             await interaction.followup.send(":x: This command must be used in a text channel.", ephemeral=True)
             return
 
+        existing_vc = self.engine.voice_clients.get(guild_id)
+        was_connected = existing_vc is not None and existing_vc.is_connected()
+        if await self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction) is None:
+            return
+
         try:
             info = await get_running_loop().run_in_executor(None, self.search_source, query)
             if not info:
                 raise ValueError("Failed to extract information.")
-            if "entries" in info:
-                if not info["entries"]:
-                    raise ValueError("No results found.")
-                info = info["entries"][0]
             stream_url = info.get("url")
             if not (webpage_url := info.get("webpage_url")):
                 raise ValueError("No webpage URL found.")
         except Exception as e:
+            if not was_connected:
+                await self.engine.disconnect_and_cleanup(guild_id)
             await interaction.followup.send(f":x: Failed to retrieve video. Error: {e}", ephemeral=True)
             return
 
-        if await self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction) is None:
-            return
         self.engine.command_channels[guild_id] = channel
         title = info.get("title", "Unknown Title")
         duration = info.get("duration_string", "N/A")
@@ -124,7 +121,12 @@ class MusicCog(commands.Cog):
 
     def search_source(self, query: str):
         with YoutubeDL(self.ydl_opts) as ydl:
-            return ydl.extract_info(query, download=False)
+            info = ydl.extract_info(query, download=False)
+        if info and "entries" in info:
+            if not info["entries"]:
+                raise ValueError("No results found.")
+            return info["entries"][0]
+        return info
 
     def search_source_autocomplete(self, query: str):
         opts = dict(self.ydl_opts)
@@ -134,10 +136,6 @@ class MusicCog(commands.Cog):
 
     async def refresh_stream_url(self, source_url: str) -> str | None:
         info = await get_running_loop().run_in_executor(None, self.search_source, source_url)
-        if "entries" in info:
-            if not info["entries"]:
-                raise ValueError("No results found while refreshing stream URL.")
-            info = info["entries"][0]
         return info.get("url")
 
     def cog_unload(self):
@@ -149,9 +147,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="stop", description="Stop the currently playing audio and disconnect.")
     async def stop(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id) is None:
             return
         await self.engine.disconnect_and_cleanup(guild_id)
@@ -159,9 +155,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="pause", description="Pause the currently playing audio.")
     async def pause(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if (vc := await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)) is None:
             return
         if vc.is_playing():
@@ -172,9 +166,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="resume", description="Resume paused audio.")
     async def resume(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if (vc := await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)) is None:
             return
         if vc.is_paused():
@@ -185,9 +177,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="queue", description="Show the current music queue. Displays up to 10 items and indicates if there are more.")
     async def queue(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
 
         max_display = 10
         queue_items = []
@@ -195,12 +185,12 @@ class MusicCog(commands.Cog):
             _, title, duration = self.engine.currently_playing[guild_id]
             queue_items.append(f"**Now Playing:** {title} [{duration}]")
 
-        if guild_id in self.engine.queues and self.engine.queues[guild_id]:
-            for i, item in enumerate(list(self.engine.queues[guild_id])[:max_display]):
-                queue_items.append(f"{i+1}. {item.title} [{item.duration}]")
+        queue = self.engine.queues.get(guild_id, ())
+        for i, item in enumerate(list(queue)[:max_display]):
+            queue_items.append(f"{i+1}. {item.title} [{item.duration}]")
 
-            if len(self.engine.queues[guild_id]) > max_display:
-                queue_items.append(f"\n...and {len(self.engine.queues[guild_id]) - max_display} more.")
+        if len(queue) > max_display:
+            queue_items.append(f"\n...and {len(queue) - max_display} more.")
 
         if not queue_items:
             await interaction.response.send_message(":x: The music queue is currently empty.")
@@ -214,9 +204,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="skip", description="Skip the current song.")
     async def skip(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if (vc := await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)) is None:
             return
         if vc.is_playing() or vc.is_paused():
@@ -227,9 +215,7 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="shuffle", description="Shuffle the current music queue.")
     async def shuffle(self, interaction: Interaction):
-        if (guild_id := interaction.guild_id) is None:
-            await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
-            return
+        assert (guild_id := interaction.guild_id) is not None
         if guild_id in self.engine.queues and self.engine.queues[guild_id]:
             shuffled = list(self.engine.queues[guild_id])
             shuffle(shuffled)
