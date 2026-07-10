@@ -3,9 +3,9 @@ from os import makedirs, path
 from typing import TYPE_CHECKING
 
 from aiosqlite import connect
-from discord import (ButtonStyle, Embed, Interaction, Member, Role, StageChannel, Object,
-                     PermissionOverwrite, VoiceChannel, VoiceState,
-                     app_commands)
+from discord import (ButtonStyle, Embed, Interaction, Member, NotFound, Object,
+                     PermissionOverwrite, Role, StageChannel, VoiceChannel,
+                     VoiceState, app_commands)
 from discord.ext import commands
 from discord.ui import Button, Modal, TextInput, View, button
 
@@ -20,6 +20,7 @@ class VoiceControlView(View):
         super().__init__(timeout=None)
         self.channel = channel
         self.owner = owner
+        self.connect_overwrites: dict[Role | Member, bool | None] = {}
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user != self.owner:
@@ -32,9 +33,27 @@ class VoiceControlView(View):
     @button(label="Lock", style=ButtonStyle.red)
     async def lock_channel(self, interaction: Interaction, button: Button) -> None:
         if interaction.guild is None: return
-        overwrite = self.channel.overwrites_for(interaction.guild.default_role)
-        overwrite.connect = False
-        await self.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+        overwrites = self.channel.overwrites
+        default_role = interaction.guild.default_role
+        overwrites.setdefault(
+            default_role, self.channel.overwrites_for(default_role)
+        )
+        self.connect_overwrites.clear()
+        for target, overwrite in overwrites.items():
+            if target == self.owner or (
+                target != default_role and overwrite.connect is not True
+            ):
+                continue
+            if isinstance(target, Object):
+                if target.type is Role:
+                    continue
+                try:
+                    target = await interaction.guild.fetch_member(target.id)
+                except NotFound:
+                    continue
+            self.connect_overwrites[target] = overwrite.connect
+            overwrite.connect = False
+            await self.channel.set_permissions(target, overwrite=overwrite)
 
         button.disabled = True
         if isinstance(btn2 := self.children[1], Button):
@@ -45,9 +64,11 @@ class VoiceControlView(View):
     @button(label="Unlock", style=ButtonStyle.green, disabled=True)
     async def unlock_channel(self, interaction: Interaction, button: Button) -> None:
         if interaction.guild is None: return
-        overwrite = self.channel.overwrites_for(interaction.guild.default_role)
-        overwrite.connect = None
-        await self.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+        for target, connect_permission in self.connect_overwrites.items():
+            overwrite = self.channel.overwrites_for(target)
+            overwrite.connect = connect_permission
+            await self.channel.set_permissions(target, overwrite=overwrite)
+        self.connect_overwrites.clear()
 
         button.disabled = True
         if isinstance(btn1 := self.children[0], Button):
@@ -194,10 +215,10 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
 
     async def _create_lobby(self, member: Member, generator: VoiceChannel | StageChannel) -> None:
         guild = member.guild
-        overwrites: dict[Role | Member | Object, PermissionOverwrite] = {
-            guild.default_role: PermissionOverwrite(connect=True),
-            member: PermissionOverwrite(connect=True, move_members=True, manage_channels=True),
-        }
+        overwrites = generator.overwrites
+        overwrites.setdefault(member, PermissionOverwrite()).update(
+            connect=True, move_members=True, manage_channels=True
+        )
 
         new_channel = await guild.create_voice_channel(
             name=f"⏲️ {member.display_name}'s lobby",
