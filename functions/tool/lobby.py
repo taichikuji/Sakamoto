@@ -101,6 +101,12 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
         self.bot = bot
         self.active_channels: set[int] = set()
         self.generators: dict[int, int] = {}  # guild_id -> channel_id
+        self.control_views: dict[int, VoiceControlView] = {}
+
+    def cog_unload(self):
+        for view in self.control_views.values():
+            view.stop()
+        self.control_views.clear()
 
     async def cog_load(self):
         await self._init_db()
@@ -239,13 +245,19 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
                 description=f"Welcome to your temporary channel, {member.mention}.\nUse the buttons below to manage it.",
                 color=self.bot.color,
             )
-            await new_channel.send(embed=embed, view=VoiceControlView(new_channel, member))
+            view = VoiceControlView(new_channel, member)
+            self.control_views[new_channel.id] = view
+            await new_channel.send(embed=embed, view=view)
         except Exception as e:
             logger.error("Failed to set up lobby for %s: %s", member.display_name, e)
+            if view := self.control_views.pop(new_channel.id, None):
+                view.stop()
             self.active_channels.discard(new_channel.id)
             await new_channel.delete()
 
     async def _delete_lobby(self, channel: VoiceChannel | StageChannel) -> None:
+        if view := self.control_views.pop(channel.id, None):
+            view.stop()
         try:
             await channel.delete(reason="Dynamic channel empty")
         except Exception as e:

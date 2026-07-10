@@ -159,26 +159,31 @@ class AudioEngine:
             return False
 
         self.currently_playing[guild_id] = (source_url, title, duration)
+        source = None
         try:
+            source = FFmpegPCMAudio(
+                stream_url,
+                before_options=self.ffmpeg_opts["before_options"],
+                options=self.ffmpeg_opts["options"],
+            )
             vc.play(
-                FFmpegPCMAudio(
-                    stream_url,
-                    before_options=self.ffmpeg_opts["before_options"],
-                    options=self.ffmpeg_opts["options"],
-                ),
+                source,
                 after=lambda e: self.play_next(guild_id, e),
             )
             return True
         except Exception as e:
+            if source is not None:
+                source.cleanup()
             logger.error("Playback failed to start in guild %s: %s", guild_id, e)
             self.play_next(guild_id, e)
             return False
 
     async def disconnect_and_cleanup(self, guild_id: int):
-        if (vc := self.voice_clients.pop(guild_id, None)) and vc.is_connected():
+        if vc := self.voice_clients.pop(guild_id, None):
             try:
                 vc.stop()
-                await vc.disconnect()
+                if vc.is_connected():
+                    await vc.disconnect()
             except Exception as e:
                 logger.error("Error during disconnect for guild %s: %s", guild_id, e)
         self.queues.pop(guild_id, None)

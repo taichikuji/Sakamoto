@@ -235,6 +235,12 @@ async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
     assert overwrites[member].connect is True
     assert overwrites[member].move_members is True
     assert overwrites[member].manage_channels is True
+    view = cog.control_views[new_channel.id]
+
+    await cog._delete_lobby(new_channel)
+
+    assert view.is_finished()
+    assert cog.control_views == {}
 
 
 @pytest.mark.asyncio
