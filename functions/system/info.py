@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from discord import Embed, Interaction, app_commands
 from discord.ext import commands
-from psutil import Process, boot_time
+from psutil import Process
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -47,13 +47,15 @@ class InfoCog(commands.Cog):
 
     @staticmethod
     async def _get_mem_usage():
-        mem_usage = float(Process(getpid()).memory_info().rss) / 1000000
-        return f"{round(mem_usage, 2)} MB"
+        process = Process(getpid())
+        mem_usage = float(process.memory_info().rss) / 1000000
+        child_count = len(process.children(recursive=True))
+        return f"{round(mem_usage, 2)} MB\nChild processes: {child_count}"
 
     async def uptime(self):
-        boot_time_timestamp = boot_time()
+        start_time_timestamp = Process(getpid()).create_time()
         current_time_timestamp = time.time()
-        uptime_seconds = int(current_time_timestamp - boot_time_timestamp)
+        uptime_seconds = int(current_time_timestamp - start_time_timestamp)
         uptime_hours = uptime_seconds // 3600
         uptime_minutes = (uptime_seconds % 3600) // 60
         return f"{uptime_hours} hours, {uptime_minutes} minutes"
