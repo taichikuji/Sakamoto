@@ -244,4 +244,5 @@ def get_audio_engine(bot: "Sakamoto") -> AudioEngine:
     if engine is None:
         engine = AudioEngine(bot)
         setattr(bot, "_audio_engine", engine)
+        bot.add_listener(engine.handle_voice_state_update, "on_voice_state_update")
     return engine

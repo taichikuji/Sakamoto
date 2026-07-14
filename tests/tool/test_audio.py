@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool._audio_engine import AudioEngine, QueueItem
+from functions.tool._audio_engine import AudioEngine, QueueItem, get_audio_engine
 from functions.tool.music import MusicCog
 from functions.tool.radio import RadioCog
 
@@ -114,7 +114,7 @@ class DummySession:
 
 
 def _make_bot(*, session=None):
-    return SimpleNamespace(loop=object(), color=0x123456, session=session)
+    return SimpleNamespace(loop=object(), color=0x123456, session=session, add_listener=MagicMock())
 
 
 def _make_interaction(*, user, guild_id=1):
@@ -125,6 +125,15 @@ def _make_interaction(*, user, guild_id=1):
         response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()),
     )
+
+
+def test_audio_engine_registers_voice_listener_once():
+    bot = _make_bot()
+
+    engine = get_audio_engine(bot)
+
+    assert get_audio_engine(bot) is engine
+    bot.add_listener.assert_called_once_with(engine.handle_voice_state_update, "on_voice_state_update")
 
 
 @pytest.mark.asyncio
