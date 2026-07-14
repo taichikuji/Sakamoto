@@ -71,16 +71,11 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
             return ":x: Steam service is temporarily unavailable (503). Please try again later."
         return f":x: Steam API returned HTTP `{status}`. Please try again later."
 
-    def _steam_id_help_message(self, steam_identifier: str, extra: str | None = None) -> str:
-        details = ""
-        if extra:
-            reason = extra.strip()
-            if reason.startswith(":x:"):
-                reason = reason.removeprefix(":x:").strip()
-            details = f"Reason: {reason}\n"
+    def _steam_id_help_message(self, steam_identifier: str, error: str | None = None) -> str:
+        reason = f"Reason: {error.removeprefix(':x:').strip()}\n" if error else ""
         return (
             f":x: Could not resolve `{steam_identifier}` to a valid SteamID64.\n"
-            f"{details}"
+            f"{reason}"
             "Use one of these formats:\n"
             "- 17-digit SteamID64 (example: `76561198000000000`)\n"
             "- Full Steam profile URL (`https://steamcommunity.com/id/<vanity>` or `/profiles/<steamid64>`)\n"
@@ -149,9 +144,6 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
         except Exception as e:
             logger.error("Exception during Steam ID resolution for '%s': %s", vanity_name, e)
             return None, ":x: Unexpected error while resolving your Steam account. Please try again later."
-        
-        # Default return if no resolution
-        return None, ":x: Could not resolve the provided Steam identifier."
 
     @app_commands.command(name="link", description="Link your Discord account to a Steam ID or vanity URL.")
     async def link_steam(self, interaction: Interaction, steam_identifier: str):
