@@ -76,6 +76,26 @@ async def test_save_and_get_steam_link_roundtrip(tmp_path):
     assert linked == "76561198000000010"
 
 
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [
+        (400, "400 Bad Request"),
+        (401, "401/403"),
+        (403, "401/403"),
+        (404, "404"),
+        (405, "405"),
+        (429, "429"),
+        (500, "500"),
+        (503, "503"),
+        (418, "HTTP `418`"),
+    ],
+)
+def test_steam_http_error_messages_are_status_specific(tmp_path, status, detail):
+    cog = SteamCog(DummyBot(db_path=tmp_path / "steam.db", session=None))
+
+    assert detail in cog._steam_http_error_message(status)
+
+
 @pytest.mark.asyncio
 async def test_resolve_steam_id_returns_direct_profile_id(monkeypatch, tmp_path):
     monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
@@ -84,7 +104,7 @@ async def test_resolve_steam_id_returns_direct_profile_id(monkeypatch, tmp_path)
 
     result = await cog._resolve_steam_id("76561198000000042")
 
-    assert result == "76561198000000042"
+    assert result == ("76561198000000042", None)
 
 
 @pytest.mark.asyncio
@@ -95,7 +115,7 @@ async def test_resolve_steam_id_extracts_profiles_url(monkeypatch, tmp_path):
 
     result = await cog._resolve_steam_id("https://steamcommunity.com/profiles/76561198000000042/")
 
-    assert result == "76561198000000042"
+    assert result == ("76561198000000042", None)
 
 
 @pytest.mark.asyncio
@@ -114,7 +134,7 @@ async def test_resolve_steam_id_resolves_vanity_via_api(monkeypatch, tmp_path):
 
     result = await cog._resolve_steam_id("my-vanity-name")
 
-    assert result == "76561198000000123"
+    assert result == ("76561198000000123", None)
     assert session.calls[0][1]["vanityurl"] == "my-vanity-name"
 
 
@@ -123,12 +143,18 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
     monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
     no_session_bot = DummyBot(db_path=tmp_path / "a.db", session=None)
     no_session_cog = SteamCog(no_session_bot)
-    assert await no_session_cog._resolve_steam_id("alice") is None
+    assert await no_session_cog._resolve_steam_id("alice") == (
+        None,
+        ":x: The bot's HTTP session is not ready. Please try again later.",
+    )
 
     monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", None)
     tokenless_bot = DummyBot(db_path=tmp_path / "b.db", session=DummySession([]))
     tokenless_cog = SteamCog(tokenless_bot)
-    assert await tokenless_cog._resolve_steam_id("alice") is None
+    assert await tokenless_cog._resolve_steam_id("alice") == (
+        None,
+        ":x: The bot's Steam API key is not configured. Please contact the bot owner.",
+    )
 
     monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
     non_200_bot = DummyBot(
@@ -136,21 +162,30 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
         session=DummySession([DummyResponse(500, {"response": {}})]),
     )
     non_200_cog = SteamCog(non_200_bot)
-    assert await non_200_cog._resolve_steam_id("alice") is None
+    assert await non_200_cog._resolve_steam_id("alice") == (
+        None,
+        ":x: Steam had an internal server error (500). Please try again shortly.",
+    )
 
     unresolved_bot = DummyBot(
         db_path=tmp_path / "d.db",
         session=DummySession([DummyResponse(200, {"response": {"success": 42}})]),
     )
     unresolved_cog = SteamCog(unresolved_bot)
-    assert await unresolved_cog._resolve_steam_id("alice") is None
+    assert await unresolved_cog._resolve_steam_id("alice") == (
+        None,
+        "Steam could not find that vanity profile name (success code 42).",
+    )
 
     error_bot = DummyBot(
         db_path=tmp_path / "e.db",
         session=DummySession([RuntimeError("network down")]),
     )
     error_cog = SteamCog(error_bot)
-    assert await error_cog._resolve_steam_id("alice") is None
+    assert await error_cog._resolve_steam_id("alice") == (
+        None,
+        ":x: Unexpected error while resolving your Steam account. Please try again later.",
+    )
 
 
 @pytest.mark.asyncio
@@ -174,13 +209,17 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
 
     interaction = _make_interaction()
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam3.db", session=DummySession([])))
-    cog._resolve_steam_id = AsyncMock(return_value=None)
+    cog._resolve_steam_id = AsyncMock(
+        return_value=(None, "Steam could not find that vanity profile name (success code 42).")
+    )
     await SteamCog.link_steam.callback(cog, interaction, "alice")
-    interaction.followup.send.assert_awaited()
+    assert "Reason: Steam could not find that vanity profile name (success code 42)." in (
+        interaction.followup.send.await_args.args[0]
+    )
 
     interaction = _make_interaction(user_id=7)
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam4.db", session=DummySession([])))
-    cog._resolve_steam_id = AsyncMock(return_value="76561198000000007")
+    cog._resolve_steam_id = AsyncMock(return_value=("76561198000000007", None))
     cog._save_steam_link = AsyncMock()
     await SteamCog.link_steam.callback(cog, interaction, "alice")
     cog._save_steam_link.assert_awaited_once_with(7, "76561198000000007")
