@@ -216,7 +216,7 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             if len(before.channel.members) == 0:
                 await self._delete_lobby(before.channel)
 
-        if after.channel and after.channel.id == self.generators.get(after.channel.guild.id):
+        if not member.bot and after.channel and after.channel.id == self.generators.get(after.channel.guild.id):
             await self._create_lobby(member, after.channel)
 
     async def _create_lobby(self, member: Member, generator: VoiceChannel | StageChannel) -> None:

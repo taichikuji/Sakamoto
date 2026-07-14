@@ -280,7 +280,7 @@ async def test_voice_state_update_routes_to_create_and_delete_paths(tmp_path):
     guild = SimpleNamespace(id=5)
     before_channel = SimpleNamespace(id=42, members=[])
     after_channel = SimpleNamespace(id=99, guild=guild)
-    member = SimpleNamespace(guild=guild)
+    member = SimpleNamespace(guild=guild, bot=False)
     before = SimpleNamespace(channel=before_channel)
     after = SimpleNamespace(channel=after_channel)
 
@@ -291,3 +291,21 @@ async def test_voice_state_update_routes_to_create_and_delete_paths(tmp_path):
 
     cog._delete_lobby.assert_awaited_once_with(before_channel)
     cog._create_lobby.assert_awaited_once_with(member, after_channel)
+
+
+@pytest.mark.asyncio
+async def test_voice_state_update_does_not_create_lobby_for_bot(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._create_lobby = AsyncMock()
+    guild = SimpleNamespace(id=5)
+    generator = SimpleNamespace(id=99, guild=guild)
+    member = SimpleNamespace(guild=guild, bot=True)
+    cog.generators = {5: 99}
+
+    await cog.on_voice_state_update(
+        member,
+        SimpleNamespace(channel=None),
+        SimpleNamespace(channel=generator),
+    )
+
+    cog._create_lobby.assert_not_awaited()

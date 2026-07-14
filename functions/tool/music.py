@@ -3,7 +3,7 @@ from collections import deque
 from random import shuffle
 from typing import TYPE_CHECKING
 
-from discord import Embed, Interaction, Member, VoiceState, app_commands
+from discord import Embed, Interaction, Member, app_commands
 from discord.ext import commands
 from yt_dlp import YoutubeDL
 
@@ -140,10 +140,6 @@ class MusicCog(commands.Cog):
 
     def cog_unload(self):
         self.engine.unload()
-
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState):
-        await self.engine.handle_voice_state_update(member, before, after)
 
     @app_commands.command(name="stop", description="Stop the currently playing audio and disconnect.")
     async def stop(self, interaction: Interaction):
