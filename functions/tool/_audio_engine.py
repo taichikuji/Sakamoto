@@ -220,9 +220,6 @@ class AudioEngine:
             run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
 
     async def handle_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState):
-        if member.bot:
-            return
-
         guild_id = member.guild.id
         vc = self.voice_clients.get(guild_id)
         if vc is None:
@@ -230,6 +227,11 @@ class AudioEngine:
 
         if not vc.is_connected() or not vc.channel:
             await self.disconnect_and_cleanup(guild_id)
+            return
+
+        if member.bot:
+            if member.id == self.bot.user.id and after.channel and len(after.channel.members) == 1:
+                await self.disconnect_and_cleanup(guild_id)
             return
 
         if before.channel == vc.channel and after.channel != vc.channel:

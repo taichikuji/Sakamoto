@@ -738,6 +738,25 @@ async def test_queue_displays_queued_items():
 
 
 @pytest.mark.asyncio
+async def test_bot_disconnects_when_moved_to_empty_voice_channel():
+    bot = _make_bot()
+    bot.user = SimpleNamespace(id=99)
+    member = SimpleNamespace(id=99, bot=True, guild=SimpleNamespace(id=1))
+    new_channel = SimpleNamespace(members=[member])
+    cog = AudioEngine(bot)
+    cog.voice_clients[1] = DummyVoiceClient(connected=True, channel=new_channel)
+    cog.disconnect_and_cleanup = AsyncMock()
+
+    await cog.handle_voice_state_update(
+        member,
+        SimpleNamespace(channel=object()),
+        SimpleNamespace(channel=new_channel),
+    )
+
+    cog.disconnect_and_cleanup.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
 async def test_disconnect_and_cleanup_clears_all_state():
     vc = DummyVoiceClient(connected=True, playing=True)
     cog = AudioEngine(_make_bot())
