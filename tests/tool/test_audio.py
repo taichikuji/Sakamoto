@@ -706,8 +706,49 @@ async def test_enqueue_or_play_queues_when_playing():
         followup=followup,
     )
 
-    assert cog.queues[1][0].title == "Mataro Radio"
+    item = cog.queues[1][0]
+    assert item.title == "Mataro Radio"
+    assert item.stream_url == "https://radio.garden/api/ara/content/listen/sFtKSe5I/channel.mp3"
     followup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_queued_track_refreshes_stream_url_before_playback(monkeypatch):
+    vc = DummyVoiceClient(connected=True, playing=True)
+    cog = AudioEngine(_make_bot())
+    cog.voice_clients[1] = vc
+    followup = AsyncMock()
+    refresh_stream = AsyncMock(return_value="https://stream.test/fresh")
+    monkeypatch.setattr(
+        "functions.tool._audio_engine.FFmpegPCMAudio",
+        lambda stream_url, **_kw: f"audio:{stream_url}",
+    )
+
+    await cog.enqueue_or_play(
+        1,
+        source_url="https://youtube.test/watch?v=abc",
+        title="Track",
+        duration="3:00",
+        stream_url="https://stream.test/stale",
+        followup=followup,
+        refresh_stream=refresh_stream,
+    )
+
+    item = cog.queues[1].popleft()
+    assert item.source_url == "https://youtube.test/watch?v=abc"
+    assert item.stream_url is None
+
+    await cog.play_next_track_and_announce(
+        1,
+        item.source_url,
+        item.title,
+        item.duration,
+        item.stream_url,
+        item.refresh_stream,
+    )
+
+    refresh_stream.assert_awaited_once_with("https://youtube.test/watch?v=abc")
+    assert vc.play.call_args.args[0] == "audio:https://stream.test/fresh"
 
 
 @pytest.mark.asyncio
