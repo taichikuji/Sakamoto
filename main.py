@@ -52,7 +52,7 @@ class Sakamoto(commands.AutoShardedBot):
             name="Use /help to view all commands!", type=ActivityType.listening
         )
         await self.change_presence(activity=display)
-        logger.info("Ui Online! - %s %s", self.user.name, self.user.id)
+        logger.info("I am online! - %s %s", self.user.name, self.user.id)
 
     async def close(self):
         try:
