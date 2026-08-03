@@ -10,7 +10,7 @@ from discord.utils import setup_logging
 setup_logging()
 logger = logging.getLogger("Sakamoto")
 
-if (TOKEN := environ.get("TOKEN")) is None:
+if not (TOKEN := environ.get("TOKEN")):
     raise OSError("TOKEN environment variable not set")
 
 class Sakamoto(commands.AutoShardedBot):
@@ -23,7 +23,6 @@ class Sakamoto(commands.AutoShardedBot):
             case_insensitive=True,
             intents=intents,
         )
-        self._bot_token = TOKEN
         self.session: ClientSession | None = None
         self.color = 0xFF3351
         self.db_path = "data/sakamoto.sqlite"
@@ -67,4 +66,4 @@ class Sakamoto(commands.AutoShardedBot):
 
 if __name__ == "__main__":
     logger.info("Starting Sakamoto...")
-    Sakamoto().run()
+    Sakamoto().run(TOKEN, reconnect=True, log_handler=None)
