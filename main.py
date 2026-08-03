@@ -34,8 +34,13 @@ class Sakamoto(commands.AutoShardedBot):
             if ext.name.startswith("_"):
                 continue
             module = ".".join(ext.with_suffix("").parts)
-            await self.load_extension(module)
-            logger.info("Loaded %s", module)
+            try:
+                await self.load_extension(module)
+                logger.info("Loaded %s", module)
+            except Exception as e:
+                # Catches ExtensionFailed (like in steam.py), ImportErrors, etc.
+                logger.error("Failed to load %s: %s", module, e)
+
 
     async def on_ready(self):
         assert self.user is not None, "self.user is None in on_ready!"
