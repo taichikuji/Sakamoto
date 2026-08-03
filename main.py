@@ -1,6 +1,6 @@
 import logging
-from glob import iglob
-from os import environ, sep
+from os import environ
+from pathlib import Path
 
 from aiohttp import ClientSession
 from discord import Activity, ActivityType, Intents
@@ -12,7 +12,6 @@ logger = logging.getLogger("Sakamoto")
 
 if (TOKEN := environ.get("TOKEN")) is None:
     raise OSError("TOKEN environment variable not set")
-
 
 class Sakamoto(commands.AutoShardedBot):
     def __init__(self):
@@ -31,20 +30,13 @@ class Sakamoto(commands.AutoShardedBot):
 
     async def setup_hook(self):
         self.session = ClientSession()
-        for functions in iglob("functions/**/*.py", recursive=True):
-            filename = functions.split(sep)[-1]
-            if filename.startswith("_"):
+
+        for ext in Path("functions").rglob("*.py"):
+            if ext.name.startswith("_"):
                 continue
-            module = functions.replace(".py", "").replace(sep, ".")
-            try:
-                await self.load_extension(module)
-                logger.info("Loaded %s", module)
-            except ImportError:
-                logger.error("Extension import failure! [%s]", module)
-            except commands.errors.ExtensionFailed:
-                logger.error("Extension failed! [%s]", module)
-            except Exception:
-                logger.error("Unexpected exception! [%s]", module)
+            module = ".".join(ext.with_suffix("").parts)
+            await self.load_extension(module)
+            logger.info("Loaded %s", module)
 
     async def on_ready(self):
         assert self.user is not None, "self.user is None in on_ready!"
