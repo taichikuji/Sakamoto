@@ -38,31 +38,15 @@ class Sakamoto(commands.AutoShardedBot):
             logger.info("Loaded %s", module)
 
     async def on_ready(self):
-        assert self.user is not None, "self.user is None in on_ready!"
-        display = Activity(
-            name="Use /help to view all commands!", type=ActivityType.listening
-        )
+        display = Activity(name="Use /help to view all commands!", type=ActivityType.listening)
         await self.change_presence(activity=display)
         logger.info("I am online! - %s %s", self.user.name, self.user.id)
 
     async def close(self):
-        try:
-            if self.session is not None:
-                await self.session.close()
-            await super().close()
-            logger.info("Session closed!")
-        except Exception as e:
-            logger.error("Failed to close aiohttp session - %s", e)
-            raise
-
-    def run(self, *args, **kwargs):
-        try:
-            super().run(str(self._bot_token), reconnect=True, log_handler=None, *args, **kwargs)
-        except TypeError:
-            logger.error("An unexpected keyword argument was passed!")
-        except Exception as e:
-            logger.error("An exception occurred: %s", e)
-
+        if self.session:
+            await self.session.close()
+        await super().close()
+        logger.info("Session closed!")
 
 if __name__ == "__main__":
     logger.info("Starting Sakamoto...")
