@@ -38,6 +38,7 @@ class Sakamoto(commands.AutoShardedBot):
             logger.info("Loaded %s", module)
 
     async def on_ready(self):
+        assert self.user is not None, "self.user is None in on_ready!"
         display = Activity(name="Use /help to view all commands!", type=ActivityType.listening)
         await self.change_presence(activity=display)
         logger.info("I am online! - %s %s", self.user.name, self.user.id)
