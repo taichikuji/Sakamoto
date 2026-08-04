@@ -14,7 +14,7 @@ class ReplaceCog(commands.Cog):
         self.bot = bot
         self.patterns: list[tuple[Pattern[str], str]] = [
             (compile(r'https?://(?:www\.)?(?:x|twitter)\.com/(?P<user>[^/\s]+)/status/(?P<id>\d+)(?:\?[^ \s]*)?'),
-             r'https://vxtwitter.com/\g<user>/status/\g<id>'),
+             r'https://fixupx.com/\g<user>/status/\g<id>'),
             (compile(r'https?://(?:www\.)?(?:bsky\.social|bsky\.app)/(?P<rest>\S+)'),
              r'https://fxbsky.app/\g<rest>'),
             (compile(r'https?://(?:www\.|vm\.)?tiktok\.com/(?P<rest>\S+)'),
