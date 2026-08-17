@@ -19,9 +19,9 @@ autoflake = "*"
 "discord.py" = {extras = ["voice"], version = "*"}
 aiohttp = "*"
 psutil = "*"
-yt-dlp = "*"
 aiosqlite = "*"
 pynacl = "*"
+yt-dlp = "*"
 
 [requires]
 python_version = "3.14"
