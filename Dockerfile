@@ -3,31 +3,37 @@ FROM python:3.14-slim AS builder
 WORKDIR /usr/src/app
 
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends build-essential git libffi-dev ffmpeg libnacl-dev python3-dev libopus-dev && \
-    pip install pipenv
-
-RUN mkdir -p /ffmpeg-deps/usr/bin && \
-    cp $(which ffmpeg) $(which ffprobe) /ffmpeg-deps/usr/bin/ && \
-    mkdir -p /ffmpeg-deps/usr/lib && \
-    ldd $(which ffmpeg) | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' /ffmpeg-deps/usr/lib/
+    apt-get install -y --no-install-recommends quickjs && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir pipenv
 
 COPY Pipfile Pipfile.lock ./
-RUN pipenv requirements > requirements.txt
+RUN pipenv requirements --hash > requirements.txt
 
 FROM python:3.14-slim
 
+# Keep unbuffered if want more logs, keep buffered if want more performance
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /usr/src/app
 
-COPY --from=builder /usr/src/app/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=bind,from=builder,source=/usr/src/app/requirements.txt,target=/tmp/requirements.txt \
+    pip install --no-cache-dir --no-compile --require-hashes -r /tmp/requirements.txt && \
+    python -m pip uninstall -y pip
 
-COPY --from=builder /ffmpeg-deps/usr/bin/* /usr/bin/
-COPY --from=builder /ffmpeg-deps/usr/lib/* /usr/lib/
+COPY --from=mwader/static-ffmpeg:9.0 /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=builder /usr/bin/qjs /usr/local/bin/qjs
 
-RUN ldconfig
+RUN groupadd --system sakamoto && \
+    useradd --system --gid sakamoto --create-home sakamoto && \
+    mkdir -p data && \
+    chown sakamoto:sakamoto data
 
-COPY main.py ./
-COPY functions ./functions/
+COPY --chown=sakamoto:sakamoto main.py ./
+COPY --chown=sakamoto:sakamoto functions ./functions/
+
+USER sakamoto
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD ["python", "-c", "import socket; socket.create_connection(('discord.com', 443), timeout=5)"]

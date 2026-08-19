@@ -17,11 +17,11 @@ autoflake = "*"
 
 [packages]
 "discord.py" = {extras = ["voice"], version = "*"}
+"yt-dlp" = {extras = ["default"], version = "*"}
 aiohttp = "*"
 psutil = "*"
 aiosqlite = "*"
 pynacl = "*"
-yt-dlp = "*"
 
 [requires]
 python_version = "3.14"
