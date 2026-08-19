@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class VoiceControlView(View):
     def __init__(self, channel: VoiceChannel, owner: Member):
         super().__init__(timeout=None)
@@ -33,11 +32,13 @@ class VoiceControlView(View):
     @button(label="Lock", style=ButtonStyle.red)
     async def lock_channel(self, interaction: Interaction, button: Button) -> None:
         if interaction.guild is None: return
+
         overwrites = self.channel.overwrites
         default_role = interaction.guild.default_role
         overwrites.setdefault(
             default_role, self.channel.overwrites_for(default_role)
         )
+
         self.connect_overwrites.clear()
         for target, overwrite in overwrites.items():
             if target == self.owner or (
@@ -51,35 +52,38 @@ class VoiceControlView(View):
                     target = await interaction.guild.fetch_member(target.id)
                 except NotFound:
                     continue
+
             self.connect_overwrites[target] = overwrite.connect
             overwrite.connect = False
             await self.channel.set_permissions(target, overwrite=overwrite)
 
         button.disabled = True
-        if isinstance(btn2 := self.children[1], Button):
-            btn2.disabled = False
+        if isinstance(second_button := self.children[1], Button):
+            second_button.disabled = False
+
         await interaction.response.edit_message(view=self)
         await interaction.followup.send(":lock: Channel locked.", ephemeral=True)
 
     @button(label="Unlock", style=ButtonStyle.green, disabled=True)
     async def unlock_channel(self, interaction: Interaction, button: Button) -> None:
         if interaction.guild is None: return
+
         for target, connect_permission in self.connect_overwrites.items():
             overwrite = self.channel.overwrites_for(target)
             overwrite.connect = connect_permission
             await self.channel.set_permissions(target, overwrite=overwrite)
-        self.connect_overwrites.clear()
 
+        self.connect_overwrites.clear()
         button.disabled = True
-        if isinstance(btn1 := self.children[0], Button):
-            btn1.disabled = False
+        if isinstance(first_button := self.children[0], Button):
+            first_button.disabled = False
+
         await interaction.response.edit_message(view=self)
         await interaction.followup.send(":unlock: Channel unlocked.", ephemeral=True)
 
     @button(label="Rename", style=ButtonStyle.primary)
     async def rename_channel(self, interaction: Interaction, button: Button) -> None:
         await interaction.response.send_modal(RenameModal(self.channel))
-
 
 class RenameModal(Modal, title="Rename Channel"):
     name: TextInput = TextInput(label="New Name", placeholder="My Cool Channel", min_length=1, max_length=100)
@@ -94,9 +98,9 @@ class RenameModal(Modal, title="Rename Channel"):
             f":white_check_mark: Renamed to **{self.name.value}**", ephemeral=True
         )
 
-
 class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic voice lobby tools."):
     """Cog for dynamic voice channel creation and cleanup."""
+
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
         self.active_channels: set[int] = set()
@@ -146,10 +150,10 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             self._lobbies_cleaned = True
 
     async def _cleanup_ghost_lobbies(self):
-        if ghost_ids := {cid for cid in self.active_channels if self.bot.get_channel(cid) is None}:
+        if ghost_ids := {channel_id for channel_id in self.active_channels if self.bot.get_channel(channel_id) is None}:
             logger.info("Cleaning up %d ghost lobby channel(s).", len(ghost_ids))
             async with connect(self.bot.db_path) as db:
-                await db.executemany("DELETE FROM lobby_active WHERE channel_id = ?", [(cid,) for cid in ghost_ids])
+                await db.executemany("DELETE FROM lobby_active WHERE channel_id = ?", [(channel_id,) for channel_id in ghost_ids])
                 await db.commit()
             self.active_channels -= ghost_ids
 
@@ -236,6 +240,7 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
         try:
             await member.move_to(new_channel)
             self.active_channels.add(new_channel.id)
+
             async with connect(self.bot.db_path) as db:
                 await db.execute("INSERT INTO lobby_active (channel_id) VALUES (?)", (new_channel.id,))
                 await db.commit()
@@ -248,8 +253,9 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             view = VoiceControlView(new_channel, member)
             self.control_views[new_channel.id] = view
             await new_channel.send(embed=embed, view=view)
-        except Exception as e:
-            logger.error("Failed to set up lobby for %s: %s", member.display_name, e)
+
+        except Exception as error:
+            logger.error("Failed to set up lobby for %s: %s", member.display_name, error)
             if view := self.control_views.pop(new_channel.id, None):
                 view.stop()
             self.active_channels.discard(new_channel.id)
@@ -258,15 +264,17 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
     async def _delete_lobby(self, channel: VoiceChannel | StageChannel) -> None:
         if view := self.control_views.pop(channel.id, None):
             view.stop()
+
         try:
             await channel.delete(reason="Dynamic channel empty")
-        except Exception as e:
-            logger.error("Failed to delete lobby channel %s: %s", channel.id, e)
+        except Exception as error:
+            logger.error("Failed to delete lobby channel %s: %s", channel.id, error)
+
         self.active_channels.discard(channel.id)
+
         async with connect(self.bot.db_path) as db:
             await db.execute("DELETE FROM lobby_active WHERE channel_id = ?", (channel.id,))
             await db.commit()
-
 
 async def setup(bot: "Sakamoto"):
     """Add the LobbyCog to the bot."""

@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 
 try:
     STEAM_TOKEN = environ.get("STEAM_TOKEN")
-except Exception as e:
-    logger.error("Failed to load STEAM_TOKEN from environment. %s", e)
+except Exception as error:
+    logger.error("Failed to load STEAM_TOKEN from environment. %s", error)
     STEAM_TOKEN = None
 
 class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam account linking and lobby tools."):
     """Cog for Steam integration, linking accounts and fetching lobby information."""
+
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
         self.steam_api_base = "https://api.steampowered.com"
@@ -86,11 +87,13 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
         if not self.bot.session:
             logger.error("Bot aiohttp session is not initialized.")
             return None, ":x: The bot's HTTP session is not ready. Please try again later."
+
         if not STEAM_TOKEN:
             logger.error("STEAM_TOKEN is not set. Cannot resolve Steam ID.")
             return None, ":x: The bot's Steam API key is not configured. Please contact the bot owner."
-        
+
         vanity_name = vanity_url_or_id
+
         # regex to extract vanity name from Steam URL
         if profile_match := match(r"(?:https?://)?steamcommunity\.com/(?:id/([^/]+)|profiles/(\d{17}))/?", vanity_url_or_id, IGNORECASE):
             # matches id url
@@ -99,28 +102,29 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
             # matches profiles url
             elif profiles_part := profile_match.group(2):
                 return profiles_part, None
-            
+
         # confirm if input is indeed SteamID64 after extraction
         if fullmatch(r"\d{17}", vanity_name):
             return vanity_name, None
-        
+
         try:
             # API call to resolve vanity URL to SteamID64
             async with self.bot.session.get(
                 f"{self.steam_api_base}/ISteamUser/ResolveVanityURL/v1/",
                 params={"key": STEAM_TOKEN, "vanityurl": vanity_name, "url_type": "1"} # url_type 1 for individual profile
-            ) as resp:
-                if resp.status != 200:
-                    logger.error("Steam API error (ResolveVanityURL) - Status %s", resp.status)
-                    return None, self._steam_http_error_message(resp.status)
+            ) as response:
+                if response.status != 200:
+                    logger.error("Steam API error (ResolveVanityURL) - Status %s", response.status)
+                    return None, self._steam_http_error_message(response.status)
 
-                data = await resp.json()
-                response = data.get("response", {})
-                if response.get("success") == 1 and response.get("steamid"):
-                    return response["steamid"], None
+                data = await response.json()
+                response_data = data.get("response", {})
 
-                success_code = response.get("success")
-                api_message = response.get("message")
+                if response_data.get("success") == 1 and response_data.get("steamid"):
+                    return response_data["steamid"], None
+
+                success_code = response_data.get("success")
+                api_message = response_data.get("message")
                 logger.info(
                     "Could not resolve vanity '%s'. success=%s message=%s",
                     vanity_name,
@@ -134,37 +138,40 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
                     return None, f"Steam returned: `{api_message}`."
                 if success_code is not None:
                     return None, f"Steam could not resolve this profile (success code `{success_code}`)."
+
                 return None, "Steam returned an unexpected response while resolving this profile."
+
         except ContentTypeError:
             logger.error("ResolveVanityURL returned non-JSON content for '%s'.", vanity_name)
             return None, ":x: Steam returned an unexpected response format. Please try again later."
-        except ClientError as e:
-            logger.error("Network error during Steam ID resolution for '%s': %s", vanity_name, e)
+        except ClientError as error:
+            logger.error("Network error during Steam ID resolution for '%s': %s", vanity_name, error)
             return None, ":x: Network error while contacting Steam. Please try again in a moment."
-        except Exception as e:
-            logger.error("Exception during Steam ID resolution for '%s': %s", vanity_name, e)
+        except Exception as error:
+            logger.error("Exception during Steam ID resolution for '%s': %s", vanity_name, error)
             return None, ":x: Unexpected error while resolving your Steam account. Please try again later."
 
     @app_commands.command(name="link", description="Link your Discord account to a Steam ID or vanity URL.")
     async def link_steam(self, interaction: Interaction, steam_identifier: str):
         await interaction.response.defer(ephemeral=True)
-        
+
         if not STEAM_TOKEN:
             await interaction.followup.send(
                 ":x: The bot's Steam API key is not configured. Linking is currently unavailable. Please contact the bot owner."
             )
             return
+
         if not self.bot.session:
             await interaction.followup.send(
                 ":x: The bot's HTTP session is not ready. Please try again later."
             )
             return
-        
+
         steam_id, resolve_error = await self._resolve_steam_id(steam_identifier.strip())
         if not steam_id:
             await interaction.followup.send(self._steam_id_help_message(steam_identifier, resolve_error))
             return
-        
+
         await self._save_steam_link(interaction.user.id, steam_id)
         await interaction.followup.send(
             f":white_check_mark: Your Discord account has been successfully linked to SteamID: `{steam_id}`."
@@ -182,37 +189,39 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
                     ":x: The bot's Steam API key is not configured. Lobby fetching is unavailable. Please contact the bot owner."
                 )
                 return
+
         if not self.bot.session:
                 await interaction.followup.send(
                     ":x: The bot's HTTP session is not ready. Please try again later."
                 )
                 return
-        
+
         if not (linked_steam_id := await self._get_steam_link(interaction.user.id)):
             await interaction.followup.send(
                 ":information_source: Your Steam account is not linked. "
                 "Please use the `/steam link <your_steam_id_or_vanity_name>` command first."
             )
             return
-        
+
         try:
             async with self.bot.session.get(
                 f"{self.steam_api_base}/ISteamUser/GetPlayerSummaries/v2/",
                 params={"key": STEAM_TOKEN, "steamids": linked_steam_id}
-            ) as resp:
-                if resp.status != 200:
-                    logger.error("Steam API error (GetPlayerSummaries) - Status %s", resp.status)
-                    await interaction.followup.send(self._steam_http_error_message(resp.status))
+            ) as response:
+                if response.status != 200:
+                    logger.error("Steam API error (GetPlayerSummaries) - Status %s", response.status)
+                    await interaction.followup.send(self._steam_http_error_message(response.status))
                     return
-                data = await resp.json()
-            
+
+                data = await response.json()
+
             if not (players := data.get("response", {}).get("players", [])):
                 await interaction.followup.send(
                     ":x: Could not retrieve your player summary from Steam. "
                     "Ensure your Steam profile is public and you've linked the correct ID."
                 )
                 return
-            
+
             player_info = players[0]
             game_name = player_info.get("gameextrainfo", "Unknown Game")
 
@@ -222,14 +231,14 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
                     "Please start a game and try again."
                 )
                 return
-            
+
             if not (lobby_id := player_info.get("lobbysteamid")) or lobby_id == "0":
                 await interaction.followup.send(
                     f":information_source: You are currently playing **{game_name}** (AppID: `{app_id}`), "
                     "but you don't seem to be in a joinable lobby, or your lobby details are private."
                 )
                 return
-            
+
             lobby_url = f"https://taichikuji.github.io/redirector/?url=steam://joinlobby/{app_id}/{lobby_id}/{linked_steam_id}"
 
             embed = Embed(
@@ -239,9 +248,10 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
             )
             embed.add_field(name="Lobby Link", value=f"<{lobby_url}>", inline=False)
             embed.set_footer(text="Clicking this link requires Steam to be installed and running.")
+
             if interaction.user.display_avatar:
                 embed.set_thumbnail(url=interaction.user.display_avatar.url)
-            
+
             await interaction.followup.send(embed=embed)
 
         except ContentTypeError:
@@ -253,13 +263,13 @@ class SteamCog(commands.GroupCog, group_name="steam", group_description="Steam a
             await interaction.followup.send(
                 ":x: Steam returned an unexpected response format while fetching your lobby details."
             )
-        except ClientError as e:
-            logger.error("Network error in get_lobby for user %s (SteamID: %s): %s", interaction.user.id, linked_steam_id, e)
+        except ClientError as error:
+            logger.error("Network error in get_lobby for user %s (SteamID: %s): %s", interaction.user.id, linked_steam_id, error)
             await interaction.followup.send(
                 ":x: Network error while contacting Steam. Please try again in a moment."
             )
-        except Exception as e:
-            logger.error("get_lobby command failed for user %s (SteamID: %s): %s", interaction.user.id, linked_steam_id, e)
+        except Exception as error:
+            logger.error("get_lobby command failed for user %s (SteamID: %s): %s", interaction.user.id, linked_steam_id, error)
             await interaction.followup.send(
                 ":x: An unexpected error occurred while trying to fetch your lobby information."
             )
