@@ -10,7 +10,6 @@ from psutil import Process
 if TYPE_CHECKING:
     from main import Sakamoto
 
-
 class InfoCog(commands.Cog):
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
@@ -24,7 +23,7 @@ class InfoCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     async def create_embed(self):
-        em = {
+        embed_data = {
             "title": ":information_source: Bot's Info",
             "description": "Here's some information about me and my dependencies!",
             "color": self.bot.color,
@@ -43,7 +42,7 @@ class InfoCog(commands.Cog):
                 },
             ],
         }
-        return Embed.from_dict(em)
+        return Embed.from_dict(embed_data)
 
     @staticmethod
     async def _get_mem_usage():
@@ -59,7 +58,6 @@ class InfoCog(commands.Cog):
         uptime_hours = uptime_seconds // 3600
         uptime_minutes = (uptime_seconds % 3600) // 60
         return f"{uptime_hours} hours, {uptime_minutes} minutes"
-
 
 async def setup(bot: "Sakamoto"):
     await bot.add_cog(InfoCog(bot))

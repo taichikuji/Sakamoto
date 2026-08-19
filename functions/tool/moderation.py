@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class VotekickView(View):
     def __init__(self, bot: "Sakamoto", required_votes: int, author: Member, target: Member):
         super().__init__(timeout=60.0)
@@ -35,11 +34,12 @@ class VotekickView(View):
     async def on_timeout(self):
         if self.message:
             self.disable_all_buttons()
-            
+
             embed = self.message.embeds[0]
             embed.title = "Votekick Timed Out"
             embed.description = f":hourglass: The votekick against {self.target.mention} timed out."
             embed.color = 0xff0000 # Red
+
             await self.message.edit(embed=embed, view=self)
 
     async def update_embed(self, interaction: Interaction):
@@ -61,11 +61,12 @@ class VotekickView(View):
             self.stop()
             if self.message:
                 self.disable_all_buttons()
-                
+
                 embed = self.message.embeds[0]
                 embed.title = "Votekick Successful"
                 embed.description = f":heavy_check_mark: {self.target.mention} has been kicked from the voice channel."
                 embed.color = 0x00ff00 # Green
+
                 await self.message.edit(embed=embed, view=self)
 
             if self.target.voice and self.target.voice.channel:
@@ -74,13 +75,12 @@ class VotekickView(View):
                     await self.target.move_to(None, reason="Votekick successful.")
                 except Exception:
                     logger.error("Failed to move %s during votekick.", self.target)
-                
+
                 overwrite = PermissionOverwrite(connect=False)
                 await original_channel.set_permissions(self.target, overwrite=overwrite)
-                
+
                 if isinstance(cog := self.bot.get_cog("ModerationCog"), ModerationCog):
                     self.bot.loop.create_task(cog.unban_after_delay(self.target, original_channel, 60))
-
 
     @button(label="No", style=ButtonStyle.red)
     async def no_button(self, interaction: Interaction, button: Button):
@@ -91,9 +91,9 @@ class VotekickView(View):
         self.no_votes.add(interaction.user.id)
         await self.update_embed(interaction)
 
-
 class ModerationCog(commands.Cog):
     """Cog for moderation commands."""
+
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
         self.votekicks: dict[int, Message] = {}
@@ -102,8 +102,8 @@ class ModerationCog(commands.Cog):
         await sleep(delay)
         try:
             await channel.set_permissions(member, overwrite=None)
-        except Exception as e:
-            logger.error("Failed to remove votekick ban for %s in channel %s: %s", member, channel.id, e)
+        except Exception as error:
+            logger.error("Failed to remove votekick ban for %s in channel %s: %s", member, channel.id, error)
 
     @app_commands.command(name="votekick", description="Start a vote to kick a user from the current voice channel.")
     async def votekick(self, interaction: Interaction, member: Member):
@@ -135,7 +135,7 @@ class ModerationCog(commands.Cog):
             await interaction.response.send_message(f":x: A votekick for {member.mention} is already in progress.", ephemeral=True)
             return
 
-        member_count = sum(1 for m in voice_channel.members if not m.bot and m.id != member.id)
+        member_count = sum(1 for channel_member in voice_channel.members if not channel_member.bot and channel_member.id != member.id)
         required_votes = (member_count * 2 + 2) // 3
 
         embed = Embed(
@@ -148,7 +148,7 @@ class ModerationCog(commands.Cog):
         embed.set_footer(text="The vote will end in 60 seconds.")
 
         view = VotekickView(self.bot, required_votes, author, member)
-        
+
         await interaction.response.send_message(embed=embed, view=view)
         message = await interaction.original_response()
         view.message = message
@@ -156,7 +156,6 @@ class ModerationCog(commands.Cog):
 
         await view.wait()
         self.votekicks.pop(member.id, None)
-
 
 async def setup(bot: "Sakamoto"):
     await bot.add_cog(ModerationCog(bot))
