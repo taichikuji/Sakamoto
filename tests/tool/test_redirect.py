@@ -15,7 +15,7 @@ from functions.tool.redirect import ReplaceCog
     [
         (
             "see https://twitter.com/alice/status/12345",
-            "see https://vxtwitter.com/alice/status/12345",
+            "see https://fixupx.com/alice/status/12345",
         ),
         (
             "feed https://bsky.app/profile/a.test/post/b",
@@ -97,4 +97,4 @@ async def test_on_message_sends_rewritten_text_when_content_changes():
 
     await cog.on_message(message)
 
-    channel.send.assert_awaited_once_with("https://vxtwitter.com/alice/status/12345")
+    channel.send.assert_awaited_once_with("https://fixupx.com/alice/status/12345")
