@@ -134,8 +134,8 @@ class MusicCog(commands.Cog):
             "no_warnings": True,
             "source_address": "0.0.0.0",
             "ignoreerrors": True,
-            "js_runtimes": {"quickjs": {}},
-            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
+            # Enable only if YouTube playback requires QuickJS; also uncomment Dockerfile support.
+            # "js_runtimes": {"quickjs": {}},
             "extract_flat": "in_playlist" if is_url else False,
             "noplaylist": not is_url,
             "playlistend": 50,
