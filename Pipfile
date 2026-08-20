@@ -17,7 +17,8 @@ autoflake = "*"
 
 [packages]
 "discord.py" = {extras = ["voice"], version = "*"}
-"yt-dlp" = {extras = ["default"], version = "*"}
+"yt-dlp" = "*"
+yt-dlp-ejs = "*"
 aiohttp = "*"
 psutil = "*"
 aiosqlite = "*"
