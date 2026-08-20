@@ -1,84 +1,35 @@
-# Sakamoto Context
+# Sakamoto Domain Context
 
-Sakamoto is a voice-first Discord community bot for small-to-medium servers. This glossary defines the canonical language for voice sessions, moderation actions, and optional integrations.
+Sakamoto is a voice-first Discord bot. Use the following terms consistently.
 
-## Language
+| Term | Meaning | Avoid |
+| --- | --- | --- |
+| **Generator Channel** | Voice channel that creates a member-owned Temporary Lobby when joined. | Spawn channel, auto-room |
+| **Temporary Lobby** | Short-lived voice channel deleted when empty. | Private room, session room |
+| **Lobby Owner** | Member who created a Temporary Lobby and manages it. | Host, operator |
+| **Playback Session** | Per-guild music connection, current track, and queue. | Player instance, stream job |
+| **Queue Entry** | Requested track waiting in a Playback Session. | Playlist item, ticket |
+| **Voice Votekick** | Time-bounded vote by channel participants to remove a member from that channel. | Ban vote, timeout vote |
+| **Temporary Rejoin Ban** | Short-lived channel permission block after a Voice Votekick. | Permanent ban, mute |
+| **Server Moderator** | Member with elevated Discord permissions who configures or safeguards the bot. | Owner*, staff |
+| **Steam Link** | Persisted mapping of a Discord user to a SteamID64. | Steam account cache, token |
+| **Pipenv Environment** | Repository's canonical dependency and command environment. | Global pip, ad-hoc virtualenv |
+| **Optional Integration** | Feature module that may be unavailable without harming core voice use. | Required module, core dependency |
+| **Degraded Capability** | Non-core feature unavailable while core slash commands and voice workflows continue. | Outage, crash |
 
-### Voice Experience
-
-**Generator Channel**:
-A designated voice channel that triggers creation of a member-owned **Temporary Lobby** when joined.
-_Avoid_: Lobby creator, spawn channel, auto-room
-
-**Temporary Lobby**:
-A short-lived voice channel created for one member and deleted automatically when empty.
-_Avoid_: Private room, permanent room, session room
-
-**Lobby Owner**:
-The member who triggered a **Temporary Lobby** and receives management controls for that lobby.
-_Avoid_: Host, admin, operator
-
-**Playback Session**:
-The active music state for one guild, including connection, current track, and pending **Queue Entries**.
-_Avoid_: Player instance, stream job
-
-**Queue Entry**:
-A single requested track waiting in a guild's **Playback Session**.
-_Avoid_: Playlist item, ticket
-
-### Moderation and Safety
-
-**Voice Votekick**:
-A time-bounded vote by voice-channel participants to remove one member from the current voice channel.
-_Avoid_: Ban vote, timeout vote
-
-**Temporary Rejoin Ban**:
-A short-lived channel permission block applied after a successful **Voice Votekick**.
-_Avoid_: Permanent ban, mute
-
-**Server Moderator**:
-A server member with elevated Discord permissions used to configure and safeguard bot behavior.
-_Avoid_: Owner (unless literally the server owner), staff (too broad)
-
-### Integrations and Operations
-
-**Steam Link**:
-The persisted mapping between a Discord user and their SteamID64.
-_Avoid_: Steam account cache, Steam token
-
-**Pipenv Environment**:
-The canonical Python dependency and execution environment for this repository.
-_Avoid_: Global pip installs, ad-hoc virtualenv workflows
-
-**Optional Integration**:
-A feature module that may be unavailable without making the bot's core voice experience unhealthy.
-_Avoid_: Required module, core dependency
-
-**Degraded Capability**:
-A non-core feature that is unavailable while core slash-command and voice workflows remain operational.
-_Avoid_: Outage, crash
+\* Use “owner” only for the literal Discord server owner.
 
 ## Relationships
 
-- One **Generator Channel** in a guild can create many **Temporary Lobbies** over time.
-- One **Temporary Lobby** has exactly one initial **Lobby Owner**.
-- One guild has zero or one active **Playback Session** at any moment.
-- One **Playback Session** contains zero or more **Queue Entries**.
-- One user has zero or one **Steam Link**.
-- Python dependency installation and command execution run through the **Pipenv Environment** (`pipenv sync`, `pipenv run ...`).
-- A successful **Voice Votekick** creates one **Temporary Rejoin Ban** for one target member in one channel.
-- An **Optional Integration** can be unavailable while the core bot remains in **Degraded Capability** rather than outage.
+- A Generator Channel can create many Temporary Lobbies; each lobby has one initial Lobby Owner.
+- A guild has zero or one active Playback Session, containing zero or more Queue Entries.
+- A user has zero or one Steam Link.
+- A successful Voice Votekick creates one Temporary Rejoin Ban for its target in that channel.
+- Optional Integration failures are Degraded Capabilities unless core workflows fail.
+- Install dependencies and run commands through Pipenv (`pipenv sync`, `pipenv run ...`).
 
-## Example Dialogue
+## Resolved ambiguities
 
-> **Dev:** "If a member joins the Generator Channel, do we move everyone into the same lobby?"
-> **Domain expert:** "No, each join event creates a separate Temporary Lobby with its own Lobby Owner."
->
-> **Dev:** "If Steam is not configured, is that a service outage?"
-> **Domain expert:** "No, Steam is an Optional Integration, so core voice features stay healthy and only that capability is degraded."
-
-## Flagged Ambiguities
-
-- "Lobby" was used for both the trigger channel and the generated channel; resolved as **Generator Channel** vs **Temporary Lobby**.
-- "Kick" was used to mean either Discord server kick or voice-only removal; resolved as **Voice Votekick** for the voice-only action.
-- "Broken bot" was used when optional features failed; resolved as **Degraded Capability** unless core voice flows are affected.
+- “Lobby” means Generator Channel (trigger) or Temporary Lobby (generated), never both.
+- “Kick” means Voice Votekick for voice-only removal; use Discord server kick for the server action.
+- Do not call optional-integration failure a “broken bot” unless core voice flows fail.

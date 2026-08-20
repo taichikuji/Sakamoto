@@ -1,88 +1,48 @@
 # Sakamoto
-## Who is Sakamoto?
 
-Sakamoto is a bot written in Python, inspired by the character Sakamoto from the Nichijou! show
+Sakamoto is a modular Python Discord bot inspired by the *Nichijou* character. It focuses on voice features for small-to-medium communities.
 
-<p align="center"><img src="media/icon.webp" width="150px" /><br/>
-<img src="https://img.shields.io/github/license/taichikuji/Sakamoto?color=FF3351&logo=github" />
-<img src="https://img.shields.io/github/commit-activity/w/taichikuji/Sakamoto?label=commits&logo=github" />
-<img src="https://img.shields.io/librariesio/github/taichikuji/Miia-Py?logo=github" />
+It is a Python rewrite intended to apply stronger modular design than earlier projects.
+
+<p align="center">
+  <img src="media/icon.webp" width="150" alt="Sakamoto icon"><br>
+  <img src="https://img.shields.io/github/license/taichikuji/Sakamoto?color=FF3351&logo=github" alt="License">
+  <img src="https://img.shields.io/github/commit-activity/w/taichikuji/Sakamoto?label=commits&logo=github" alt="Commit activity">
+  <img src="https://img.shields.io/librariesio/github/taichikuji/Miia-Py?logo=github" alt="Dependencies">
 </p>
 
-## Why Python?
+## Run
 
-Because this is a rewrite and retry at writing best practices code in Python, keeping modularity as it was with my previous projects
+See the [setup guide](https://github.com/taichikuji/Sakamoto/wiki/How-to-get-the-bot-working/) and [configuration reference](https://github.com/taichikuji/Sakamoto/wiki/Configuration-Guide#setting-environment-variables) for integration-specific tokens.
 
-## How do I make it work?
-
-[Check our setup guide in the wiki](https://github.com/taichikuji/Sakamoto/wiki/How-to-get-the-bot-working/)
-
-To deploy, you have the following options:
-
-1. **Using Docker-Compose**  
-    Pass the variable into your `docker-compose.yml` file or export it:
-    ```bash
-    export TOKEN='TOKEN'
-    ```  
-    Afterwards, deploy easily with:
-    ```bash
-    ./deploy-dc.sh
-    ```
-
-2. **Using Docker Build and Run**  
-    Build the image:
-    ```bash
-    docker build -t sakamoto:latest .
-    ```  
-    Run the container with the TOKEN environment variable:
-    ```bash
-    docker run -e TOKEN="TOKEN" sakamoto:latest
-    ```
-
-> **Note**: If you plan on also using a Cog / Module that requires an additional API Token, check the wiki's specific entry for additional token requirements here: [Setting environment variables](https://github.com/taichikuji/Sakamoto/wiki/Configuration-Guide#setting-environment-variables)
-
-### 3. **Using ghcr.io**
-
-You can now deploy using GitHub Packages without building the Dockerfile yourself!
-
-Simply pull the image with the following command:
+### Docker Compose
 
 ```bash
-docker pull ghcr.io/taichikuji/Sakamoto:latest
+export TOKEN='YOUR_DISCORD_BOT_TOKEN'
+./init-docker.sh
 ```
 
-This image can even be used in your Kubernetes cluster!
+### Docker image
 
-We don't have a Kubernetes deployment YAML at the moment, but one may be provided in the future
+```bash
+docker build -t sakamoto:latest .
+docker run -e TOKEN='YOUR_DISCORD_BOT_TOKEN' sakamoto:latest
+```
 
-### Auto-Updater
+Prebuilt images are available as `ghcr.io/taichikuji/sakamoto:latest`; they can be used with Kubernetes, though this repository does not provide a Kubernetes manifest.
 
-To enable automatic updates, uncomment the `updater` service and the `labels` section in `docker-compose.yml`.
-You can change the update frequency by modifying the `CRON_SCHEDULE` environment variable (default: `0 0 * * *` for daily checks)
+To enable the built-in updater, uncomment its service and the `discord` service labels in `docker-compose.yml`. `CRON_SCHEDULE` defaults to `0 0 * * *` (daily).
 
-## Contributing
+## Develop
 
-The project follows a modular architecture, making it easy to add new features. New functionality can be added by creating new Python files in the appropriate directories under `functions/`
+```bash
+pipenv install --dev
+export TOKEN='YOUR_DISCORD_BOT_TOKEN'
+pipenv run python main.py
+```
 
-We welcome contributions from the community! When contributing, GitHub will automatically provide:
-- Bug report template when reporting bugs
-- Feature request template when suggesting features
-- Pull request template when submitting code changes
+Extensions live in `functions/`: `system/` for administration and `tool/` for user-facing features. See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
 
-For detailed contribution guidelines, see our [contribution guide](.github/CONTRIBUTING.md).
-For detailed project documentation, visit our [wiki](https://github.com/taichikuji/Sakamoto/wiki).
+## Dependencies
 
-## Uses:
-
-- <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/github/pipenv/locked/python-version/taichikuji/Sakamoto"/></a>
-- <a href="https://pypi.org/project/pipenv/"><img src="https://img.shields.io/pypi/v/pipenv"/></a>
-
-### Dependencies
-
-- <a href="https://pypi.org/project/discord.py/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/discord.py/master"/></a>
-- <a href="https://pypi.org/project/aiohttp/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/aiohttp/master"/></a>
-- <a href="https://pypi.org/project/psutil/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/psutil/master"/></a>
-- <a href="https://pypi.org/project/yt-dlp/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/yt-dlp/master"/></a>
-- <a href="https://pypi.org/project/pynacl/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/pynacl/master"/></a>
-- <a href="https://pypi.org/project/aiosqlite/"><img src="https://img.shields.io/github/pipenv/locked/dependency-version/taichikuji/Sakamoto/aiosqlite/master"/></a>
-
+Can be seen @ [Pipfile](https://github.com/taichikuji/Sakamoto/blob/main/Pipfile)
