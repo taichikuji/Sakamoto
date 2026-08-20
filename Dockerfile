@@ -26,8 +26,8 @@ RUN --mount=type=bind,from=builder,source=/usr/src/app/requirements.txt,target=/
 COPY --from=mwader/static-ffmpeg:9.0 /ffmpeg /usr/local/bin/ffmpeg
 # COPY --from=builder /usr/bin/qjs /usr/local/bin/qjs
 
-RUN groupadd --system sakamoto && \
-    useradd --system --gid sakamoto --create-home sakamoto && \
+RUN groupadd --gid 10001 sakamoto && \
+    useradd --uid 10001 --gid sakamoto --create-home --shell /usr/sbin/nologin sakamoto && \
     mkdir -p data && \
     chown sakamoto:sakamoto data
 

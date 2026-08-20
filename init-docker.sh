@@ -82,8 +82,10 @@ else
     log "$ERROR" "Git update failed"; exit 1
 fi
 
-# Build and start new version
-if docker compose build --force-rm && docker compose up -d; then
+# Build, migrate persistent data ownership, and start new version
+if docker compose build --force-rm && \
+    docker compose run --rm --user root --entrypoint chown discord -R sakamoto:sakamoto /usr/src/app/data && \
+    docker compose up -d; then
     cleanup_buildkit
     log "$SUCCESS" "Build and start successful"
 else
