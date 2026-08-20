@@ -30,7 +30,7 @@ class AudioEngine:
         self.bot = bot
         self.voice_clients: dict[int, VoiceClient] = {}
         self.queues: defaultdict[int, deque[QueueItem]] = defaultdict(deque)
-        self.currently_playing: dict[int, tuple[str, str, str]] = {}
+        self.currently_playing: dict[int, tuple[str, str]] = {}
         self.command_channels: dict[int, Messageable] = {}
 
     async def enqueue_or_play(
@@ -87,7 +87,6 @@ class AudioEngine:
             await followup(":x: Queue is full (50 items).", ephemeral=True)
             return
 
-        tracks_to_add = entries[:available_slots]
         queued = len(queue)
 
         def format_duration(duration_value):
@@ -96,7 +95,7 @@ class AudioEngine:
             hours, minutes = divmod(minutes, 60)
             return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
 
-        for entry in tracks_to_add:
+        for entry in entries[:available_slots]:
             is_youtube = entry.get("extractor_key") in {"Youtube", "YoutubeSearch"}
             url = entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={entry['id']}" if is_youtube and entry.get("id") else entry.get("url"))
             if not url: continue
@@ -149,7 +148,7 @@ class AudioEngine:
         if not started:
             return
 
-        if guild_id in self.command_channels and (channel := self.command_channels[guild_id]):
+        if channel := self.command_channels.get(guild_id):
             try:
                 if item.duration == "LIVE":
                     await channel.send(f":radio: Playing **{item.title}** on Radio Garden")
@@ -209,7 +208,7 @@ class AudioEngine:
             await self.disconnect_and_cleanup(guild_id)
             return False
 
-        self.currently_playing[guild_id] = (source_url, title, duration)
+        self.currently_playing[guild_id] = (title, duration)
         source = None
         try:
             source = FFmpegOpusAudio(
@@ -285,8 +284,7 @@ class AudioEngine:
                 await self.disconnect_and_cleanup(guild_id)
 
 def get_audio_engine(bot: "Sakamoto") -> AudioEngine:
-    engine = getattr(bot, "_audio_engine", None)
-    if engine is None:
+    if (engine := getattr(bot, "_audio_engine", None)) is None:
         engine = AudioEngine(bot)
         setattr(bot, "_audio_engine", engine)
         bot.add_listener(engine.handle_voice_state_update, "on_voice_state_update")
