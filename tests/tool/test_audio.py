@@ -166,7 +166,7 @@ async def test_play_song_starts_playback_and_tracks_current_song(monkeypatch):
     started = await cog.play_song(1, "https://example.test/watch", "https://stream.test", "Track", "3:00")
 
     assert started is True
-    assert cog.currently_playing[1] == ("https://example.test/watch", "Track", "3:00")
+    assert cog.currently_playing[1] == ("Track", "3:00")
     assert vc.play.call_args.args[0] == "audio:https://stream.test"
 
 
@@ -194,7 +194,7 @@ async def test_play_song_cleans_state_when_voice_client_disappears():
     cog = AudioEngine(_make_bot())
     cog.voice_clients[1] = DummyVoiceClient(connected=False)
     cog.queues[1] = deque([QueueItem("url", "Queued", "3:00")])
-    cog.currently_playing[1] = ("url", "Playing", "3:00")
+    cog.currently_playing[1] = ("Playing", "3:00")
     cog.command_channels[1] = object()
 
     assert await cog.play_song(1, "url", "stream", "Track", "3:00") is False
@@ -907,7 +907,7 @@ async def test_disconnect_and_cleanup_clears_all_state():
     cog = AudioEngine(_make_bot())
     cog.voice_clients[1] = vc
     cog.queues[1] = deque([QueueItem("u", "t", "d")])
-    cog.currently_playing[1] = ("u", "t", "d")
+    cog.currently_playing[1] = ("t", "d")
     cog.command_channels[1] = object()
 
     await cog.disconnect_and_cleanup(1)
@@ -957,7 +957,7 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
     cog = AudioEngine(_make_bot())
     cog.voice_clients[1] = DummyVoiceClient(connected=False)
     cog.queues[1] = deque([QueueItem("u", "t", "d")])
-    cog.currently_playing[1] = ("u", "t", "d")
+    cog.currently_playing[1] = ("t", "d")
     cog.command_channels[1] = object()
     scheduled = []
 

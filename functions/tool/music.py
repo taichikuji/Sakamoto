@@ -25,16 +25,6 @@ class MusicCog(commands.Cog):
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
         self.engine = get_audio_engine(bot)
-        self.ydl_opts: dict[str, Any] = {
-            "format": "ba[abr>0][vcodec=none]/bestaudio/best",
-            "quiet": True,
-            "nocheckcertificate": True,
-            "no_warnings": True,
-            "source_address": "0.0.0.0",
-            "ignoreerrors": True,
-            "js_runtimes": {"quickjs": {}},
-            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
-        }
         self.source_cache: dict[str, tuple[float, dict]] = {}
 
     async def interaction_check(self, interaction: Interaction) -> bool:
@@ -138,14 +128,20 @@ class MusicCog(commands.Cog):
     def search_source(self, query: str) -> dict:
         """Resolve one complete result, or a flat playlist."""
         is_url = self.is_url(query)
-        options = dict(self.ydl_opts)
-        options["extract_flat"] = "in_playlist" if is_url else False
-        options["noplaylist"] = not is_url
-        options["playlistend"] = 50
-        extraction_query = query if is_url else f"ytsearch1:{query}"
-
+        options: dict[str, Any] = {
+            "format": "ba[acodec=opus]/ba[ext=m4a]/bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "source_address": "0.0.0.0",
+            "ignoreerrors": True,
+            "js_runtimes": {"quickjs": {}},
+            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
+            "extract_flat": "in_playlist" if is_url else False,
+            "noplaylist": not is_url,
+            "playlistend": 50,
+        }
         with YoutubeDL(cast(Any, options)) as youtube_dl_client:
-            info = cast(dict, youtube_dl_client.extract_info(extraction_query, download=False))
+            info = cast(dict, youtube_dl_client.extract_info(query if is_url else f"ytsearch1:{query}", download=False))
         if not info or (not is_url and "entries" in info and not info["entries"]):
             raise ValueError("No results found.")
         return info
@@ -194,10 +190,9 @@ class MusicCog(commands.Cog):
     def first_track(info: dict) -> dict:
         if "entries" not in info:
             return info
-        entries = [entry for entry in info.get("entries") or [] if entry]
-        if not entries:
+        if not (track := next((entry for entry in info.get("entries") or [] if entry), None)):
             raise ValueError("No results found.")
-        return entries[0]
+        return track
 
     @staticmethod
     def source_url(track_info: dict, requested_url: str | None = None) -> str | None:
@@ -255,7 +250,7 @@ class MusicCog(commands.Cog):
         queue_items = []
 
         if guild_id in self.engine.currently_playing:
-            _, title, duration = self.engine.currently_playing[guild_id]
+            title, duration = self.engine.currently_playing[guild_id]
             queue_items.append(f"**Now Playing:** {title} [{duration}]")
 
         queue = self.engine.queues.get(guild_id, ())
@@ -292,23 +287,19 @@ class MusicCog(commands.Cog):
         if amount > queue_length + 1:
             await interaction.response.send_message(f":x: The amount of entries you are trying to skip ({amount}) is higher than the amount of entries in the queue ({queue_length}). Please try again.", ephemeral=True)
             return
-
-        if amount > 1:
-            for _ in range(amount - 1):
-                queue.popleft()
+        for _ in range(amount - 1):
+            queue.popleft()
 
         voice_client.stop()
 
-        if amount == 1:
-            await interaction.response.send_message(":track_next: Skipped.")
-        else:
-            await interaction.response.send_message(f":track_next: Skipped {amount} songs.")
+        message = ":track_next: Skipped." if amount == 1 else f":track_next: Skipped {amount} songs."
+        await interaction.response.send_message(message)
 
     @app_commands.command(name="shuffle", description="Shuffle the current music queue.")
     async def shuffle(self, interaction: Interaction):
         assert (guild_id := interaction.guild_id) is not None
-        if guild_id in self.engine.queues and self.engine.queues[guild_id]:
-            shuffled = list(self.engine.queues[guild_id])
+        if queue := self.engine.queues.get(guild_id):
+            shuffled = list(queue)
             shuffle(shuffled)
             self.engine.queues[guild_id] = deque(shuffled)
             await interaction.response.send_message(":twisted_rightwards_arrows: Queue shuffled.")
