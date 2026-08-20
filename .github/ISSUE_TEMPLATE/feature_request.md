@@ -1,24 +1,16 @@
 ---
-name: Feature Request
-about: Suggest a new feature or enhancement for Sakamoto
+name: Feature request
+about: Suggest a Sakamoto improvement
 title: "[FEATURE] "
 labels: enhancement
 assignees: ''
 ---
 
-# Feature Request
+## Problem
+<!-- What need does this address? -->
 
-## Problem Statement
-<!-- Describe the problem this feature would solve -->
+## Proposed solution
+<!-- What should happen? Include an example use case when helpful. -->
 
-## Proposed Solution
-<!-- Describe the solution you'd like -->
-
-## Alternatives Considered
-<!-- Describe any alternative solutions or features you've considered -->
-
-## Example Use Case
-<!-- Provide an example of how this feature would be used -->
-
-## Additional Context
-<!-- Add any other context, screenshots, or sketches about the feature request here -->
+## Alternatives / context
+<!-- Alternatives, screenshots, sketches, or other useful details. -->

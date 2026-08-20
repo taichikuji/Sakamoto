@@ -1,160 +1,35 @@
 # Contributing to Sakamoto
 
-Thank you for your interest in contributing to Sakamoto! This document provides guidelines and instructions for contributing to the project.
+Be respectful and constructive. Report bugs and propose features through the provided GitHub templates; search existing issues first.
 
-## Code of Conduct
+## Setup
 
-Please be respectful and considerate of others when contributing to this project. We aim to foster an inclusive and welcoming community.
-
-## How to Contribute
-
-### Commit Style
-
-Commit should follow this style:
-
-[Semantic Commit Messages](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716)
-
-Aka:
-
-Format: `<type>(<scope>): <subject>`
-
-`<scope>` is optional
-
-## Example
-
-```
-feat: add hat wobble
-^--^  ^------------^
-|     |
-|     +-> Summary in present tense.
-|
-+-------> Type: chore, docs, feat, fix, refactor, style, or test.
+```bash
+pipenv install --dev
+export TOKEN='YOUR_DISCORD_BOT_TOKEN'
+pipenv run python main.py
 ```
 
-More Examples:
+Create the token in the [Discord Developer Portal](https://discord.com/developers/applications). Use `pipenv run ...` for project commands.
 
-- `feat`: (new feature for the user, not a new feature for build script)
-- `fix`: (bug fix for the user, not a fix to a build script)
-- `docs`: (changes to the documentation)
-- `style`: (formatting, missing semi colons, etc; no production code change)
-- `refactor`: (refactoring production code, eg. renaming a variable)
-- `test`: (adding missing tests, refactoring tests; no production code change)
-- `chore`: (updating grunt tasks etc; no production code change)
+## Changes and tests
 
-### Reporting Bugs
+- Put extensions in `functions/system/` (administration) or `functions/tool/` (user features); follow the existing cog and `setup` pattern.
+- Follow existing style, use clear names and appropriate type hints, and document non-obvious logic.
+- Update relevant documentation and tests. Before opening a PR, run the relevant tests and verify no new warnings or errors.
 
-If you've found a bug in Sakamoto, please create an issue using the bug report template. To ensure we can address your bug quickly, please:
+## Pull requests
 
-1. Check if the bug has already been reported
-2. Use the Bug Report template when creating a new issue on GitHub
-3. Include as much detail as possible, including steps to reproduce, expected behavior, and your environment
+1. Fork the repository and branch from `main`.
+2. Make and test a focused change.
+3. Open a PR using the supplied template and link related issues.
 
+## Commits
 
+Use [semantic commit messages](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716):
 
-### Suggesting Features
+```text
+<type>(<scope>): <subject>
+```
 
-Have an idea for a new feature or improvement? We'd love to hear it! Please:
-
-1. Check if the feature has already been suggested
-2. Use the Feature Request template when creating a new issue on GitHub
-3. Clearly describe the problem your feature would solve and how it should work
-
-
-
-### Pull Requests
-
-We welcome pull requests! Here's how to submit one:
-
-1. Fork the repository
-2. Create a new branch from `main`
-3. Make your changes
-4. Test your changes thoroughly
-5. Submit a pull request (the PR template will load automatically)
-
-
-
-## Development Setup
-
-To set up the project for local development:
-
-1. Clone your fork of the repository
-2. Install dependencies with pipenv:
-  ```bash
-   pipenv install --dev
-  ```
-3. Create a Discord bot through the [Discord Developer Portal](https://discord.com/developers/applications)
-4. Set your bot token as an environment variable:
-  ```bash
-   export TOKEN='YOUR_DISCORD_BOT_TOKEN'
-  ```
-5. Run the bot in development mode:
-  ```bash
-   pipenv run python main.py
-  ```
-
-
-
-## Project Structure
-
-Sakamoto follows a modular architecture:
-
-- `main.py`: Core bot initialization and setup
-- `functions/`: Contains all bot extensions
-  - `system/`: System and administrative commands
-  - `tool/`: User-oriented features and utilities
-- `.github/`: GitHub templates and configuration
-- `media/`: Assets and resources
-
-
-
-## Adding New Features
-
-To add a new feature:
-
-1. Decide if it's a system feature or a tool
-2. Create a new Python file in the appropriate directory:
-  - System commands go in `functions/system/`
-  - User tools go in `functions/tool/`
-3. Follow the existing module pattern with a main cog class and a setup function
-4. Use Discord.py's command and event decorators for functionality
-5. Test your feature thoroughly before submitting a PR
-
-
-
-## Code Style Guidelines
-
-Please follow these guidelines for your code contributions:
-
-- Follow PEP 8 standards
-- Use meaningful variable and function names
-- Add appropriate docstrings and comments
-- Maintain consistent naming conventions with the existing codebase
-- Use type hints where appropriate
-
-
-
-## Testing
-
-Before submitting your changes, please test them thoroughly. Ensure:
-
-1. Your feature works as expected
-2. Your change doesn't break existing functionality
-3. Your code doesn't generate new warnings or errors
-
-
-
-## Documentation
-
-If you're adding new features or changing existing ones, please update the documentation accordingly. This includes:
-
-- Docstrings in the code
-- Comments explaining complex logic
-- Updating the PROJECT_GUIDE.md if necessary
-
-
-
-## Questions?
-
-If you have any questions about contributing, please open an issue with your question or reach out to the project maintainers.
-
-Thank you for contributing to Sakamoto!
+`scope` is optional. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, and `chore`.
