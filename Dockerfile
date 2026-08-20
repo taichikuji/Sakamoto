@@ -2,10 +2,11 @@ FROM python:3.14-slim AS builder
 
 WORKDIR /usr/src/app
 
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends quickjs && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir pipenv
+# To restore QuickJS support for yt-dlp, uncomment this and the runtime COPY below.
+# RUN apt-get update -y && \
+#     apt-get install -y --no-install-recommends quickjs && \
+#     rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir pipenv
 
 COPY Pipfile Pipfile.lock ./
 RUN pipenv requirements --hash > requirements.txt
@@ -23,7 +24,7 @@ RUN --mount=type=bind,from=builder,source=/usr/src/app/requirements.txt,target=/
     python -m pip uninstall -y pip
 
 COPY --from=mwader/static-ffmpeg:9.0 /ffmpeg /usr/local/bin/ffmpeg
-COPY --from=builder /usr/bin/qjs /usr/local/bin/qjs
+# COPY --from=builder /usr/bin/qjs /usr/local/bin/qjs
 
 RUN groupadd --system sakamoto && \
     useradd --system --gid sakamoto --create-home sakamoto && \
