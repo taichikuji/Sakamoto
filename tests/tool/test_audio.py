@@ -667,6 +667,8 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
     options = youtube_dl.call_args.args[0]
     assert options["extract_flat"] is False
     assert options["noplaylist"] is True
+    assert "js_runtimes" not in options
+    assert "extractor_args" not in options
     ydl.__enter__.return_value.extract_info.assert_any_call("ytsearch1:track", download=False)
     with pytest.raises(ValueError, match="No results found"):
         cog.search_source("missing")
