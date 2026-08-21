@@ -3,9 +3,20 @@ from os import makedirs, path
 from typing import TYPE_CHECKING
 
 from aiosqlite import connect
-from discord import (ButtonStyle, Embed, Interaction, Member, NotFound, Object,
-                     PermissionOverwrite, Role, StageChannel, VoiceChannel,
-                     VoiceState, app_commands)
+from discord import (
+    ButtonStyle,
+    Embed,
+    Interaction,
+    Member,
+    NotFound,
+    Object,
+    PermissionOverwrite,
+    Role,
+    StageChannel,
+    VoiceChannel,
+    VoiceState,
+    app_commands,
+)
 from discord.ext import commands
 from discord.ui import Button, Modal, TextInput, View, button
 
@@ -13,6 +24,7 @@ if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
+
 
 class VoiceControlView(View):
     def __init__(self, channel: VoiceChannel, owner: Member):
@@ -31,19 +43,16 @@ class VoiceControlView(View):
 
     @button(label="Lock", style=ButtonStyle.red)
     async def lock_channel(self, interaction: Interaction, button: Button) -> None:
-        if interaction.guild is None: return
+        if interaction.guild is None:
+            return
 
         overwrites = self.channel.overwrites
         default_role = interaction.guild.default_role
-        overwrites.setdefault(
-            default_role, self.channel.overwrites_for(default_role)
-        )
+        overwrites.setdefault(default_role, self.channel.overwrites_for(default_role))
 
         self.connect_overwrites.clear()
         for target, overwrite in overwrites.items():
-            if target == self.owner or (
-                target != default_role and overwrite.connect is not True
-            ):
+            if target == self.owner or (target != default_role and overwrite.connect is not True):
                 continue
             if isinstance(target, Object):
                 if target.type is Role:
@@ -66,7 +75,8 @@ class VoiceControlView(View):
 
     @button(label="Unlock", style=ButtonStyle.green, disabled=True)
     async def unlock_channel(self, interaction: Interaction, button: Button) -> None:
-        if interaction.guild is None: return
+        if interaction.guild is None:
+            return
 
         for target, connect_permission in self.connect_overwrites.items():
             overwrite = self.channel.overwrites_for(target)
@@ -85,8 +95,11 @@ class VoiceControlView(View):
     async def rename_channel(self, interaction: Interaction, button: Button) -> None:
         await interaction.response.send_modal(RenameModal(self.channel))
 
+
 class RenameModal(Modal, title="Rename Channel"):
-    name: TextInput = TextInput(label="New Name", placeholder="My Cool Channel", min_length=1, max_length=100)
+    name: TextInput = TextInput(
+        label="New Name", placeholder="My Cool Channel", min_length=1, max_length=100
+    )
 
     def __init__(self, channel: VoiceChannel):
         super().__init__()
@@ -98,7 +111,10 @@ class RenameModal(Modal, title="Rename Channel"):
             f":white_check_mark: Renamed to **{self.name.value}**", ephemeral=True
         )
 
-class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic voice lobby tools."):
+
+class LobbyCog(
+    commands.GroupCog, group_name="lobby", group_description="Dynamic voice lobby tools."
+):
     """Cog for dynamic voice channel creation and cleanup."""
 
     def __init__(self, bot: "Sakamoto"):
@@ -145,15 +161,22 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if not hasattr(self, '_lobbies_cleaned'):
+        if not hasattr(self, "_lobbies_cleaned"):
             await self._cleanup_ghost_lobbies()
             self._lobbies_cleaned = True
 
     async def _cleanup_ghost_lobbies(self):
-        if ghost_ids := {channel_id for channel_id in self.active_channels if self.bot.get_channel(channel_id) is None}:
+        if ghost_ids := {
+            channel_id
+            for channel_id in self.active_channels
+            if self.bot.get_channel(channel_id) is None
+        }:
             logger.info("Cleaning up %d ghost lobby channel(s).", len(ghost_ids))
             async with connect(self.bot.db_path) as db:
-                await db.executemany("DELETE FROM lobby_active WHERE channel_id = ?", [(channel_id,) for channel_id in ghost_ids])
+                await db.executemany(
+                    "DELETE FROM lobby_active WHERE channel_id = ?",
+                    [(channel_id,) for channel_id in ghost_ids],
+                )
                 await db.commit()
             self.active_channels -= ghost_ids
 
@@ -176,10 +199,14 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
         name="set",
         description="Set or clear the voice channel that creates dynamic lobbies.",
     )
-    @app_commands.describe(channel="The voice channel to use as a lobby generator. Leave empty to clear.")
+    @app_commands.describe(
+        channel="The voice channel to use as a lobby generator. Leave empty to clear."
+    )
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def set_generator(self, interaction: Interaction, channel: VoiceChannel | None = None) -> None:
+    async def set_generator(
+        self, interaction: Interaction, channel: VoiceChannel | None = None
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
         if (guild_id := interaction.guild_id) is None:
             return
@@ -201,7 +228,9 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             )
 
     @set_generator.error
-    async def on_set_generator_error(self, interaction: Interaction, error: app_commands.AppCommandError) -> None:
+    async def on_set_generator_error(
+        self, interaction: Interaction, error: app_commands.AppCommandError
+    ) -> None:
         if isinstance(error, app_commands.errors.MissingPermissions):
             msg = ":x: You need Manage Channels permissions to configure the lobby generator."
             if interaction.response.is_done():
@@ -212,7 +241,9 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             logger.error("Unexpected error in set command: %s", error)
 
     @commands.Cog.listener()
-    async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState) -> None:
+    async def on_voice_state_update(
+        self, member: Member, before: VoiceState, after: VoiceState
+    ) -> None:
         if before.channel == after.channel:
             return
 
@@ -220,7 +251,11 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             if len(before.channel.members) == 0:
                 await self._delete_lobby(before.channel)
 
-        if not member.bot and after.channel and after.channel.id == self.generators.get(after.channel.guild.id):
+        if (
+            not member.bot
+            and after.channel
+            and after.channel.id == self.generators.get(after.channel.guild.id)
+        ):
             await self._create_lobby(member, after.channel)
 
     async def _create_lobby(self, member: Member, generator: VoiceChannel | StageChannel) -> None:
@@ -242,19 +277,24 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
             self.active_channels.add(new_channel.id)
 
             async with connect(self.bot.db_path) as db:
-                await db.execute("INSERT INTO lobby_active (channel_id) VALUES (?)", (new_channel.id,))
+                await db.execute(
+                    "INSERT INTO lobby_active (channel_id) VALUES (?)", (new_channel.id,)
+                )
                 await db.commit()
 
             embed = Embed(
                 title=":control_knobs: Voice Control",
-                description=f"Welcome to your temporary channel, {member.mention}.\nUse the buttons below to manage it.",
+                description=(
+                    f"Welcome to your temporary channel, {member.mention}.\n"
+                    "Use the buttons below to manage it."
+                ),
                 color=self.bot.color,
             )
             view = VoiceControlView(new_channel, member)
             self.control_views[new_channel.id] = view
             await new_channel.send(embed=embed, view=view)
 
-        except Exception as error:
+        except Exception as error:  # pylint: disable=broad-exception-caught
             logger.error("Failed to set up lobby for %s: %s", member.display_name, error)
             if view := self.control_views.pop(new_channel.id, None):
                 view.stop()
@@ -267,7 +307,7 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
 
         try:
             await channel.delete(reason="Dynamic channel empty")
-        except Exception as error:
+        except Exception as error:  # pylint: disable=broad-exception-caught
             logger.error("Failed to delete lobby channel %s: %s", channel.id, error)
 
         self.active_channels.discard(channel.id)
@@ -275,6 +315,7 @@ class LobbyCog(commands.GroupCog, group_name="lobby", group_description="Dynamic
         async with connect(self.bot.db_path) as db:
             await db.execute("DELETE FROM lobby_active WHERE channel_id = ?", (channel.id,))
             await db.commit()
+
 
 async def setup(bot: "Sakamoto"):
     """Add the LobbyCog to the bot."""

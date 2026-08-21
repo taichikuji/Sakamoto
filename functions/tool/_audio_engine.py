@@ -5,7 +5,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from discord import FFmpegOpusAudio, Interaction, Member, StageChannel, VoiceChannel, VoiceClient, VoiceState
+from discord import (
+    FFmpegOpusAudio,
+    Interaction,
+    Member,
+    StageChannel,
+    VoiceChannel,
+    VoiceClient,
+    VoiceState,
+)
 from discord.abc import Messageable
 
 if TYPE_CHECKING:
@@ -15,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 StreamResolver = Callable[[str], Awaitable[str | None]]
 
+
 @dataclass
 class QueueItem:
     source_url: str
@@ -22,6 +31,7 @@ class QueueItem:
     duration: str
     stream_url: str | None = None
     refresh_stream: StreamResolver | None = None
+
 
 class AudioEngine:
     """Shared playback state and voice/queue helpers."""
@@ -59,10 +69,14 @@ class AudioEngine:
 
             queued_stream_url = stream_url if duration == "LIVE" else None
             queue.append(QueueItem(source_url, title, duration, queued_stream_url, refresh_stream))
-            await followup(queue_message or f":ballot_box_with_check: Added to queue: **{title}** [{duration}]")
+            await followup(
+                queue_message or f":ballot_box_with_check: Added to queue: **{title}** [{duration}]"
+            )
             return
 
-        started = await self.play_song(guild_id, source_url, stream_url, title, duration, refresh_stream)
+        started = await self.play_song(
+            guild_id, source_url, stream_url, title, duration, refresh_stream
+        )
         if started:
             await followup(now_playing_message or f":notes: Now playing: **{title}** [{duration}]")
         else:
@@ -90,23 +104,31 @@ class AudioEngine:
         queued = len(queue)
 
         def format_duration(duration_value):
-            if not isinstance(duration_value, (int, float)): return "N/A"
+            if not isinstance(duration_value, (int, float)):
+                return "N/A"
             minutes, seconds = divmod(int(duration_value), 60)
             hours, minutes = divmod(minutes, 60)
             return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
 
         for entry in entries[:available_slots]:
             is_youtube = entry.get("extractor_key") in {"Youtube", "YoutubeSearch"}
-            url = entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={entry['id']}" if is_youtube and entry.get("id") else entry.get("url"))
-            if not url: continue
+            url = entry.get("webpage_url") or (
+                f"https://www.youtube.com/watch?v={entry['id']}"
+                if is_youtube and entry.get("id")
+                else entry.get("url")
+            )
+            if not url:
+                continue
 
-            queue.append(QueueItem(
-                source_url=url,
-                title=entry.get("title", "Unknown Title"),
-                duration=entry.get("duration_string") or format_duration(entry.get("duration")),
-                stream_url=None,
-                refresh_stream=refresh_stream
-            ))
+            queue.append(
+                QueueItem(
+                    source_url=url,
+                    title=entry.get("title", "Unknown Title"),
+                    duration=entry.get("duration_string") or format_duration(entry.get("duration")),
+                    stream_url=None,
+                    refresh_stream=refresh_stream,
+                )
+            )
 
         added = len(queue) - queued
         if not added:
@@ -115,26 +137,40 @@ class AudioEngine:
 
         if not voice_client.is_playing() and not voice_client.is_paused():
             first = queue.popleft()
-            if await self.play_song(guild_id, first.source_url, None, first.title, first.duration, refresh_stream):
-                await followup(f":notes: Started playlist. Now playing: **{first.title}**\n:ballot_box_with_check: Added {added - 1} tracks to the queue.")
+            if await self.play_song(
+                guild_id, first.source_url, None, first.title, first.duration, refresh_stream
+            ):
+                await followup(
+                    f":notes: Started playlist. Now playing: **{first.title}**\n"
+                    f":ballot_box_with_check: Added {added - 1} tracks to the queue."
+                )
             else:
                 await followup(":x: Failed to start playlist playback.", ephemeral=True)
         else:
-            await followup(f":ballot_box_with_check: Added **{added}** tracks from the playlist to the queue.")
+            await followup(
+                f":ballot_box_with_check: Added **{added}** tracks from the playlist to the queue."
+            )
 
     async def get_or_connect_voice_client(
-        self, guild_id: int, user_voice_channel: VoiceChannel | StageChannel, interaction: Interaction
+        self,
+        guild_id: int,
+        user_voice_channel: VoiceChannel | StageChannel,
+        interaction: Interaction,
     ) -> VoiceClient | None:
         voice_client = self.voice_clients.get(guild_id)
         if voice_client is None or not voice_client.is_connected():
             try:
                 voice_client = await user_voice_channel.connect(self_deaf=True)
                 self.voice_clients[guild_id] = voice_client
-            except Exception as error:
-                await interaction.followup.send(f":x: Failed to connect to the voice channel. Error: {error}", ephemeral=True)
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                await interaction.followup.send(
+                    f":x: Failed to connect to the voice channel. Error: {error}", ephemeral=True
+                )
                 return None
         elif voice_client.channel and voice_client.channel != user_voice_channel:
-            await interaction.followup.send(":x: I am already playing in another voice channel.", ephemeral=True)
+            await interaction.followup.send(
+                ":x: I am already playing in another voice channel.", ephemeral=True
+            )
             return None
 
         return voice_client
@@ -144,7 +180,14 @@ class AudioEngine:
         guild_id: int,
         item: QueueItem,
     ):
-        started = await self.play_song(guild_id, item.source_url, item.stream_url, item.title, item.duration, item.refresh_stream)
+        started = await self.play_song(
+            guild_id,
+            item.source_url,
+            item.stream_url,
+            item.title,
+            item.duration,
+            item.refresh_stream,
+        )
         if not started:
             return
 
@@ -154,21 +197,31 @@ class AudioEngine:
                     await channel.send(f":radio: Playing **{item.title}** on Radio Garden")
                 else:
                     await channel.send(f":notes: Now playing: **{item.title}** [{item.duration}]")
-            except Exception as error:
-                logger.warning("Failed to send now-playing message in guild %s: %s", guild_id, error)
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                logger.warning(
+                    "Failed to send now-playing message in guild %s: %s", guild_id, error
+                )
 
-    async def ensure_user_in_same_voice_channel(self, interaction: Interaction, guild_id: int) -> VoiceClient | None:
+    async def ensure_user_in_same_voice_channel(
+        self, interaction: Interaction, guild_id: int
+    ) -> VoiceClient | None:
         if not isinstance(user := interaction.user, Member):
-            await interaction.response.send_message(":x: This command can only be used in a server.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: This command can only be used in a server.", ephemeral=True
+            )
             return None
 
         if not user.voice or not user.voice.channel:
-            await interaction.response.send_message(":x: You need to be in a voice channel to use this command.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: You need to be in a voice channel to use this command.", ephemeral=True
+            )
             return None
 
         voice_client = self.voice_clients.get(guild_id)
         if voice_client is None or not voice_client.is_connected() or voice_client.channel is None:
-            await interaction.response.send_message(":x: The bot is not connected to a voice channel.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: The bot is not connected to a voice channel.", ephemeral=True
+            )
             return None
 
         if user.voice.channel != voice_client.channel:
@@ -192,7 +245,7 @@ class AudioEngine:
         if not stream_url and refresh_stream is not None:
             try:
                 stream_url = await refresh_stream(source_url)
-            except Exception as error:
+            except Exception as error:  # pylint: disable=broad-exception-caught
                 logger.error("Could not refresh URL for %s: %s", title, error)
                 self.play_next(guild_id)
                 return False
@@ -213,15 +266,18 @@ class AudioEngine:
         try:
             source = FFmpegOpusAudio(
                 stream_url,
-                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 10M -probesize 10M -err_detect ignore_err",
+                before_options=(
+                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+                    "-analyzeduration 10M -probesize 10M -err_detect ignore_err"
+                ),
                 options="-vn",
-                )
+            )
             voice_client.play(
                 source,
                 after=lambda error: self.play_next(guild_id, error),
-                )
+            )
             return True
-        except Exception as error:
+        except Exception as error:  # pylint: disable=broad-exception-caught
             if source is not None:
                 source.cleanup()
             logger.error("Playback failed to start in guild %s: %s", guild_id, error)
@@ -234,7 +290,7 @@ class AudioEngine:
                 voice_client.stop()
                 if voice_client.is_connected():
                     await voice_client.disconnect()
-            except Exception as error:
+            except Exception as error:  # pylint: disable=broad-exception-caught
                 logger.error("Error during disconnect for guild %s: %s", guild_id, error)
 
         self.queues.pop(guild_id, None)
@@ -264,7 +320,9 @@ class AudioEngine:
         for guild_id in list(self.voice_clients):
             run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
 
-    async def handle_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState):
+    async def handle_voice_state_update(
+        self, member: Member, before: VoiceState, after: VoiceState
+    ):
         guild_id = member.guild.id
         voice_client = self.voice_clients.get(guild_id)
         if voice_client is None:
@@ -275,13 +333,22 @@ class AudioEngine:
             return
 
         if member.bot:
-            if self.bot.user and member.id == self.bot.user.id and after.channel and len(after.channel.members) == 1:
+            if (
+                self.bot.user
+                and member.id == self.bot.user.id
+                and after.channel
+                and len(after.channel.members) == 1
+            ):
                 await self.disconnect_and_cleanup(guild_id)
             return
 
         if before.channel == voice_client.channel and after.channel != voice_client.channel:
-            if len(voice_client.channel.members) == 1 and voice_client.channel.members[0] == self.bot.user:
+            if (
+                len(voice_client.channel.members) == 1
+                and voice_client.channel.members[0] == self.bot.user
+            ):
                 await self.disconnect_and_cleanup(guild_id)
+
 
 def get_audio_engine(bot: "Sakamoto") -> AudioEngine:
     if (engine := getattr(bot, "_audio_engine", None)) is None:
