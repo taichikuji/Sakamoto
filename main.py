@@ -13,7 +13,10 @@ logger = logging.getLogger("Sakamoto")
 if not (TOKEN := environ.get("TOKEN")):
     raise OSError("TOKEN environment variable not set")
 
+
 class Sakamoto(commands.AutoShardedBot):
+    """Discord bot with shared application resources."""
+
     def __init__(self):
         intents = Intents.default()
         intents.message_content = True
@@ -37,12 +40,12 @@ class Sakamoto(commands.AutoShardedBot):
             try:
                 await self.load_extension(module)
                 logger.info("Loaded %s", module)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 # Catches ExtensionFailed (like in steam.py), ImportErrors, etc.
                 logger.error("Failed to load %s: %s", module, e)
 
-
     async def on_ready(self):
+        """Set the bot presence after connecting to Discord."""
         assert self.user is not None, "self.user is None in on_ready!"
         display = Activity(name="Use /help to view all commands!", type=ActivityType.listening)
         await self.change_presence(activity=display)
@@ -53,6 +56,7 @@ class Sakamoto(commands.AutoShardedBot):
             await self.session.close()
         await super().close()
         logger.info("Session closed!")
+
 
 if __name__ == "__main__":
     logger.info("Starting Sakamoto...")

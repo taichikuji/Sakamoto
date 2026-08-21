@@ -16,7 +16,10 @@ def test_set_generator_keeps_optional_channel_description():
     channel_param = LobbyCog.set_generator.parameters[0]
     assert LobbyCog.set_generator.name == "set"
     assert channel_param.name == "channel"
-    assert channel_param.description == "The voice channel to use as a lobby generator. Leave empty to clear."
+    assert (
+        channel_param.description
+        == "The voice channel to use as a lobby generator. Leave empty to clear."
+    )
     assert channel_param.required is False
 
 
@@ -117,9 +120,7 @@ async def test_voice_control_lock_and_unlock_toggle_permissions_and_buttons():
     assert channel.overwrites[default_role].connect is None
     assert channel.overwrites[allowed_role].connect is True
     assert channel.overwrites[owner].connect is True
-    interaction.followup.send.assert_awaited_with(
-        ":unlock: Channel unlocked.", ephemeral=True
-    )
+    interaction.followup.send.assert_awaited_with(":unlock: Channel unlocked.", ephemeral=True)
 
 
 @pytest.mark.asyncio
@@ -213,12 +214,8 @@ async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
     generator = SimpleNamespace(
         category=object(),
         overwrites={
-            default_role: PermissionOverwrite(
-                view_channel=False, connect=False
-            ),
-            allowed_role: PermissionOverwrite(
-                view_channel=True, connect=True, speak=False
-            ),
+            default_role: PermissionOverwrite(view_channel=False, connect=False),
+            allowed_role: PermissionOverwrite(view_channel=True, connect=True, speak=False),
             member: PermissionOverwrite(speak=False),
         },
     )

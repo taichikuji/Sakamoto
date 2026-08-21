@@ -282,15 +282,12 @@ async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
 
     # Not in game
     interaction = _make_interaction()
-    session = DummySession(
-        [DummyResponse(200, {"response": {"players": [{"personaname": "x"}]}})]
-    )
+    session = DummySession([DummyResponse(200, {"response": {"players": [{"personaname": "x"}]}})])
     cog = SteamCog(DummyBot(db_path=tmp_path / "c.db", session=session))
     cog._get_steam_link = AsyncMock(return_value="76561198000000001")
     await SteamCog.get_lobby.callback(cog, interaction)
     interaction.followup.send.assert_awaited_with(
-        ":x: You are not currently in a joinable game. "
-        "Please start a game and try again."
+        ":x: You are not currently in a joinable game. " "Please start a game and try again."
     )
 
     # Missing lobby
@@ -301,7 +298,9 @@ async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
                 200,
                 {
                     "response": {
-                        "players": [{"gameid": "570", "gameextrainfo": "Dota 2", "lobbysteamid": "0"}]
+                        "players": [
+                            {"gameid": "570", "gameextrainfo": "Dota 2", "lobbysteamid": "0"}
+                        ]
                     }
                 },
             )
