@@ -1,7 +1,5 @@
 import logging
 from asyncio import gather, get_running_loop
-from collections import deque
-from random import shuffle
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -11,7 +9,7 @@ from discord.abc import Messageable
 from discord.ext import commands
 from yt_dlp import YoutubeDL
 
-from ._audio_engine import get_audio_engine
+from ._audio_engine import QueueItem, get_audio_engine
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -30,7 +28,9 @@ class MusicCog(commands.Cog):
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.guild_id is not None:
             return True
-        await interaction.response.send_message(":x: Could not determine guild ID.", ephemeral=True)
+        await interaction.response.send_message(
+            ":x: Could not determine guild ID.", ephemeral=True
+        )
         return False
 
     async def play_query_autocomplete(
@@ -73,7 +73,8 @@ class MusicCog(commands.Cog):
 
         if not user.voice or not user.voice.channel:
             await interaction.response.send_message(
-                ":x: You need to be in a voice channel to use this command.", ephemeral=True
+                ":x: You need to be in a voice channel to use this command.",
+                ephemeral=True,
             )
             return
 
@@ -85,12 +86,13 @@ class MusicCog(commands.Cog):
             )
             return
 
-        existing_vc = self.engine.voice_clients.get(guild_id)
-        was_connected = existing_vc is not None and existing_vc.is_connected()
+        was_connected = self.engine.is_connected(guild_id)
         # Connecting to Discord and resolving a YouTube stream are independent network waits.
         # Start both now so a new request only waits for the slower one.
         voice_client, info = await gather(
-            self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction),
+            self.engine.get_or_connect_voice_client(
+                guild_id, user.voice.channel, interaction
+            ),
             self.resolve_source(query),
             return_exceptions=True,
         )
@@ -102,7 +104,7 @@ class MusicCog(commands.Cog):
             # a voice client that was created while the lookup was running.
             if isinstance(info, Exception):
                 raise info
-            self.engine.command_channels[guild_id] = cast(Messageable, channel)
+            self.engine.set_command_channel(guild_id, cast(Messageable, channel))
 
             if self.is_url(query) and info.get("_type") in ["playlist", "multi_video"]:
                 entries = list(info.get("entries") or [])
@@ -111,30 +113,15 @@ class MusicCog(commands.Cog):
 
                 await self.engine.enqueue_playlist(
                     guild_id=guild_id,
-                    entries=entries,
+                    items=self.playlist_items(entries),
                     followup=interaction.followup.send,
-                    refresh_stream=self.refresh_stream_url,
                 )
                 return
 
-            track_info = self.first_track(info)
-
-            stream_url = track_info.get("url")
-            webpage_url = self.source_url(track_info, requested_url=query)
-            if not webpage_url:
-                raise ValueError("No source URL found.")
-
-            title = track_info.get("title", "Unknown Title")
-            duration = track_info.get("duration_string") or str(track_info.get("duration", "N/A"))
-
             await self.engine.enqueue_or_play(
                 guild_id,
-                source_url=webpage_url,
-                title=title,
-                duration=duration,
-                stream_url=stream_url,
+                self.queue_item(self.first_track(info), requested_url=query),
                 followup=interaction.followup.send,
-                refresh_stream=self.refresh_stream_url,
             )
 
         except Exception as error:  # pylint: disable=broad-exception-caught
@@ -177,7 +164,10 @@ class MusicCog(commands.Cog):
             return cached[1]
 
         info = await get_running_loop().run_in_executor(None, self.search_source, query)
-        is_playlist = self.is_url(query) and info.get("_type") in ["playlist", "multi_video"]
+        is_playlist = self.is_url(query) and info.get("_type") in [
+            "playlist",
+            "multi_video",
+        ]
         expires_at = time() + 15 * 60
         if not is_playlist and (stream_url := self.first_track(info).get("url")):
             expires_at = self.stream_valid_until(stream_url)
@@ -216,7 +206,9 @@ class MusicCog(commands.Cog):
     def first_track(info: dict) -> dict:
         if "entries" not in info:
             return info
-        if not (track := next((entry for entry in info.get("entries") or [] if entry), None)):
+        if not (
+            track := next((entry for entry in info.get("entries") or [] if entry), None)
+        ):
             raise ValueError("No results found.")
         return track
 
@@ -226,28 +218,74 @@ class MusicCog(commands.Cog):
             return webpage_url
         if original_url := track_info.get("original_url"):
             return original_url
-        if track_info.get("extractor_key") in {"Youtube", "YoutubeSearch"} and track_info.get("id"):
+        if track_info.get("extractor_key") in {
+            "Youtube",
+            "YoutubeSearch",
+        } and track_info.get("id"):
             return f"https://www.youtube.com/watch?v={track_info['id']}"
         if requested_url and MusicCog.is_url(requested_url):
             return requested_url.strip()
         url = track_info.get("url")
         return url if isinstance(url, str) else None
 
+    @staticmethod
+    def format_duration(value) -> str:
+        if not isinstance(value, (int, float)):
+            return "N/A"
+        minutes, seconds = divmod(int(value), 60)
+        hours, minutes = divmod(minutes, 60)
+        return (
+            f"{hours}:{minutes:02d}:{seconds:02d}"
+            if hours
+            else f"{minutes}:{seconds:02d}"
+        )
+
+    def queue_item(
+        self, track_info: dict, requested_url: str | None = None
+    ) -> QueueItem:
+        if not (source_url := self.source_url(track_info, requested_url)):
+            raise ValueError("No source URL found.")
+        return QueueItem(
+            source_url=source_url,
+            title=track_info.get("title", "Unknown Title"),
+            duration=track_info.get("duration_string")
+            or self.format_duration(track_info.get("duration")),
+            stream_url=track_info.get("url"),
+            refresh_stream=self.refresh_stream_url,
+        )
+
+    def playlist_items(self, entries: list[dict]) -> list[QueueItem]:
+        items = []
+        for entry in entries:
+            try:
+                item = self.queue_item(entry)
+                item.stream_url = None
+                items.append(item)
+            except ValueError:
+                continue
+        return items
+
     async def cog_unload(self):
         self.source_cache.clear()
-        self.engine.unload()
 
     @app_commands.command(
         name="stop", description="Stop the currently playing audio and disconnect."
     )
     async def stop(self, interaction: Interaction):
         assert (guild_id := interaction.guild_id) is not None
-        if await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id) is None:
+        if (
+            await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
+            is None
+        ):
             return
         await self.engine.disconnect_and_cleanup(guild_id)
-        await interaction.response.send_message(":stop_button: Stopped and disconnected.")
+        await interaction.response.send_message(
+            ":stop_button: Stopped and disconnected."
+        )
 
-    @app_commands.command(name="pause", description="Pause the currently playing audio.")
+    @app_commands.command(
+        name="pause", description="Pause the currently playing audio."
+    )
     async def pause(self, interaction: Interaction):
         assert (guild_id := interaction.guild_id) is not None
         if (
@@ -279,7 +317,9 @@ class MusicCog(commands.Cog):
             voice_client.resume()
             await interaction.response.send_message(":arrow_forward: Playback resumed.")
         else:
-            await interaction.response.send_message(":x: Playback is not paused.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: Playback is not paused.", ephemeral=True
+            )
 
     @app_commands.command(
         name="queue",
@@ -290,19 +330,20 @@ class MusicCog(commands.Cog):
         max_display = 10
         queue_items = []
 
-        if guild_id in self.engine.currently_playing:
-            title, duration = self.engine.currently_playing[guild_id]
-            queue_items.append(f"**Now Playing:** {title} [{duration}]")
+        current, queued = self.engine.queue_snapshot(guild_id)
+        if current:
+            queue_items.append(f"**Now Playing:** {current.title} [{current.duration}]")
 
-        queue = self.engine.queues.get(guild_id, ())
-        for i, item in enumerate(list(queue)[:max_display]):
+        for i, item in enumerate(queued[:max_display]):
             queue_items.append(f"{i+1}. {item.title} [{item.duration}]")
 
-        if len(queue) > max_display:
-            queue_items.append(f"\n...and {len(queue) - max_display} more.")
+        if len(queued) > max_display:
+            queue_items.append(f"\n...and {len(queued) - max_display} more.")
 
         if not queue_items:
-            await interaction.response.send_message(":x: The music queue is currently empty.")
+            await interaction.response.send_message(
+                ":x: The music queue is currently empty."
+            )
         else:
             embed = Embed(
                 title=":notes: Music Queue",
@@ -312,10 +353,13 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
-        name="skip", description="Skip the current song, or multiple songs if specified."
+        name="skip",
+        description="Skip the current song, or multiple songs if specified.",
     )
     @app_commands.describe(amount="The amount of songs to skip (defaults to 1).")
-    async def skip(self, interaction: Interaction, amount: int = 1):
+    async def skip(
+        self, interaction: Interaction, amount: app_commands.Range[int, 1] = 1
+    ):
         assert (guild_id := interaction.guild_id) is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
@@ -330,8 +374,7 @@ class MusicCog(commands.Cog):
             )
             return
 
-        queue = self.engine.queues[guild_id]
-        queue_length = len(queue)
+        queue_length = self.engine.queued_count(guild_id)
 
         if amount > queue_length + 1:
             await interaction.response.send_message(
@@ -340,24 +383,24 @@ class MusicCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        for _ in range(amount - 1):
-            queue.popleft()
-
-        voice_client.stop()
+        self.engine.skip_tracks(guild_id, amount)
 
         message = (
-            ":track_next: Skipped." if amount == 1 else f":track_next: Skipped {amount} songs."
+            ":track_next: Skipped."
+            if amount == 1
+            else f":track_next: Skipped {amount} songs."
         )
         await interaction.response.send_message(message)
 
-    @app_commands.command(name="shuffle", description="Shuffle the current music queue.")
+    @app_commands.command(
+        name="shuffle", description="Shuffle the current music queue."
+    )
     async def shuffle(self, interaction: Interaction):
         assert (guild_id := interaction.guild_id) is not None
-        if queue := self.engine.queues.get(guild_id):
-            shuffled = list(queue)
-            shuffle(shuffled)
-            self.engine.queues[guild_id] = deque(shuffled)
-            await interaction.response.send_message(":twisted_rightwards_arrows: Queue shuffled.")
+        if self.engine.shuffle_queue(guild_id):
+            await interaction.response.send_message(
+                ":twisted_rightwards_arrows: Queue shuffled."
+            )
         else:
             await interaction.response.send_message(
                 ":x: The music queue is currently empty.", ephemeral=True

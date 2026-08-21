@@ -1,8 +1,9 @@
 import logging
 from asyncio import run_coroutine_threadsafe
-from collections import deque, defaultdict
+from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from random import shuffle
 from typing import TYPE_CHECKING
 
 from discord import (
@@ -33,122 +34,139 @@ class QueueItem:
     refresh_stream: StreamResolver | None = None
 
 
+@dataclass
+class PlaybackSession:
+    """All playback state owned by one guild."""
+
+    voice_client: VoiceClient
+    queue: deque[QueueItem] = field(default_factory=deque)
+    current: QueueItem | None = None
+    command_channel: Messageable | None = None
+
+
 class AudioEngine:
-    """Shared playback state and voice/queue helpers."""
+    """Shared voice, queue, and playback behavior."""
 
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
-        self.voice_clients: dict[int, VoiceClient] = {}
-        self.queues: defaultdict[int, deque[QueueItem]] = defaultdict(deque)
-        self.currently_playing: dict[int, tuple[str, str]] = {}
-        self.command_channels: dict[int, Messageable] = {}
+        self.sessions: dict[int, PlaybackSession] = {}
+
+    def is_connected(self, guild_id: int) -> bool:
+        session = self.sessions.get(guild_id)
+        return bool(session and session.voice_client.is_connected())
+
+    def set_command_channel(self, guild_id: int, channel: Messageable) -> None:
+        if session := self.sessions.get(guild_id):
+            session.command_channel = channel
+
+    def queue_snapshot(
+        self, guild_id: int
+    ) -> tuple[QueueItem | None, tuple[QueueItem, ...]]:
+        if not (session := self.sessions.get(guild_id)):
+            return None, ()
+        return session.current, tuple(session.queue)
+
+    def queued_count(self, guild_id: int) -> int:
+        session = self.sessions.get(guild_id)
+        return len(session.queue) if session else 0
+
+    def skip_tracks(self, guild_id: int, amount: int) -> bool:
+        session = self.sessions.get(guild_id)
+        if not session or amount < 1 or amount > len(session.queue) + 1:
+            return False
+        for _ in range(amount - 1):
+            session.queue.popleft()
+        session.voice_client.stop()
+        return True
+
+    def shuffle_queue(self, guild_id: int) -> bool:
+        if not (session := self.sessions.get(guild_id)) or not session.queue:
+            return False
+        items = list(session.queue)
+        shuffle(items)
+        session.queue.clear()
+        session.queue.extend(items)
+        return True
 
     async def enqueue_or_play(
         self,
         guild_id: int,
-        *,
-        source_url: str,
-        title: str,
-        duration: str,
-        stream_url: str | None,
+        item: QueueItem,
         followup,
+        *,
         now_playing_message: str | None = None,
         queue_message: str | None = None,
-        refresh_stream: StreamResolver | None = None,
     ) -> None:
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None or not voice_client.is_connected():
-            await followup(":x: The bot is not connected to a voice channel.", ephemeral=True)
-            return
-
-        queue = self.queues[guild_id]
-        if voice_client.is_playing() or voice_client.is_paused() or queue:
-            if len(queue) >= 50:
-                await followup(":x: Queue is full (50 items).", ephemeral=True)
-                return
-
-            queued_stream_url = stream_url if duration == "LIVE" else None
-            queue.append(QueueItem(source_url, title, duration, queued_stream_url, refresh_stream))
+        session = self.sessions.get(guild_id)
+        if session is None or not session.voice_client.is_connected():
             await followup(
-                queue_message or f":ballot_box_with_check: Added to queue: **{title}** [{duration}]"
+                ":x: The bot is not connected to a voice channel.", ephemeral=True
             )
             return
 
-        started = await self.play_song(
-            guild_id, source_url, stream_url, title, duration, refresh_stream
-        )
-        if started:
-            await followup(now_playing_message or f":notes: Now playing: **{title}** [{duration}]")
+        voice_client = session.voice_client
+        if voice_client.is_playing() or voice_client.is_paused() or session.queue:
+            if len(session.queue) >= 50:
+                await followup(":x: Queue is full (50 items).", ephemeral=True)
+                return
+
+            if item.duration != "LIVE":
+                item = replace(item, stream_url=None)
+            session.queue.append(item)
+            await followup(
+                queue_message
+                or f":ballot_box_with_check: Added to queue: **{item.title}** [{item.duration}]"
+            )
+            return
+
+        if await self.play_song(guild_id, item):
+            await followup(
+                now_playing_message
+                or f":notes: Now playing: **{item.title}** [{item.duration}]"
+            )
         else:
             await followup(":x: Failed to start playback.", ephemeral=True)
 
     async def enqueue_playlist(
         self,
         guild_id: int,
-        entries: list[dict],
+        items: list[QueueItem],
         followup,
-        refresh_stream: StreamResolver | None = None,
     ) -> None:
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None or not voice_client.is_connected():
-            await followup(":x: The bot is not connected to a voice channel.", ephemeral=True)
+        session = self.sessions.get(guild_id)
+        if session is None or not session.voice_client.is_connected():
+            await followup(
+                ":x: The bot is not connected to a voice channel.", ephemeral=True
+            )
             return
 
-        queue = self.queues[guild_id]
-        available_slots = 50 - len(queue)
-
+        available_slots = 50 - len(session.queue)
         if available_slots <= 0:
             await followup(":x: Queue is full (50 items).", ephemeral=True)
             return
 
-        queued = len(queue)
-
-        def format_duration(duration_value):
-            if not isinstance(duration_value, (int, float)):
-                return "N/A"
-            minutes, seconds = divmod(int(duration_value), 60)
-            hours, minutes = divmod(minutes, 60)
-            return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-
-        for entry in entries[:available_slots]:
-            is_youtube = entry.get("extractor_key") in {"Youtube", "YoutubeSearch"}
-            url = entry.get("webpage_url") or (
-                f"https://www.youtube.com/watch?v={entry['id']}"
-                if is_youtube and entry.get("id")
-                else entry.get("url")
+        added_items = items[:available_slots]
+        if not added_items:
+            await followup(
+                ":x: The playlist contains no playable tracks.", ephemeral=True
             )
-            if not url:
-                continue
-
-            queue.append(
-                QueueItem(
-                    source_url=url,
-                    title=entry.get("title", "Unknown Title"),
-                    duration=entry.get("duration_string") or format_duration(entry.get("duration")),
-                    stream_url=None,
-                    refresh_stream=refresh_stream,
-                )
-            )
-
-        added = len(queue) - queued
-        if not added:
-            await followup(":x: The playlist contains no playable tracks.", ephemeral=True)
             return
 
+        session.queue.extend(added_items)
+        voice_client = session.voice_client
         if not voice_client.is_playing() and not voice_client.is_paused():
-            first = queue.popleft()
-            if await self.play_song(
-                guild_id, first.source_url, None, first.title, first.duration, refresh_stream
-            ):
+            first = session.queue.popleft()
+            if await self.play_song(guild_id, first):
                 await followup(
                     f":notes: Started playlist. Now playing: **{first.title}**\n"
-                    f":ballot_box_with_check: Added {added - 1} tracks to the queue."
+                    f":ballot_box_with_check: Added {len(added_items) - 1} tracks to the queue."
                 )
             else:
                 await followup(":x: Failed to start playlist playback.", ephemeral=True)
         else:
             await followup(
-                f":ballot_box_with_check: Added **{added}** tracks from the playlist to the queue."
+                f":ballot_box_with_check: Added **{len(added_items)}** tracks "
+                "from the playlist to the queue."
             )
 
     async def get_or_connect_voice_client(
@@ -157,14 +175,16 @@ class AudioEngine:
         user_voice_channel: VoiceChannel | StageChannel,
         interaction: Interaction,
     ) -> VoiceClient | None:
-        voice_client = self.voice_clients.get(guild_id)
+        session = self.sessions.get(guild_id)
+        voice_client = session.voice_client if session else None
         if voice_client is None or not voice_client.is_connected():
             try:
                 voice_client = await user_voice_channel.connect(self_deaf=True)
-                self.voice_clients[guild_id] = voice_client
+                self.sessions[guild_id] = PlaybackSession(voice_client)
             except Exception as error:  # pylint: disable=broad-exception-caught
                 await interaction.followup.send(
-                    f":x: Failed to connect to the voice channel. Error: {error}", ephemeral=True
+                    f":x: Failed to connect to the voice channel. Error: {error}",
+                    ephemeral=True,
                 )
                 return None
         elif voice_client.channel and voice_client.channel != user_voice_channel:
@@ -176,30 +196,27 @@ class AudioEngine:
         return voice_client
 
     async def play_next_track_and_announce(
-        self,
-        guild_id: int,
-        item: QueueItem,
-    ):
-        started = await self.play_song(
-            guild_id,
-            item.source_url,
-            item.stream_url,
-            item.title,
-            item.duration,
-            item.refresh_stream,
-        )
-        if not started:
+        self, guild_id: int, item: QueueItem
+    ) -> None:
+        if not await self.play_song(guild_id, item):
             return
 
-        if channel := self.command_channels.get(guild_id):
+        session = self.sessions.get(guild_id)
+        if session and session.command_channel:
             try:
                 if item.duration == "LIVE":
-                    await channel.send(f":radio: Playing **{item.title}** on Radio Garden")
+                    await session.command_channel.send(
+                        f":radio: Playing **{item.title}** on Radio Garden"
+                    )
                 else:
-                    await channel.send(f":notes: Now playing: **{item.title}** [{item.duration}]")
+                    await session.command_channel.send(
+                        f":notes: Now playing: **{item.title}** [{item.duration}]"
+                    )
             except Exception as error:  # pylint: disable=broad-exception-caught
                 logger.warning(
-                    "Failed to send now-playing message in guild %s: %s", guild_id, error
+                    "Failed to send now-playing message in guild %s: %s",
+                    guild_id,
+                    error,
                 )
 
     async def ensure_user_in_same_voice_channel(
@@ -213,12 +230,18 @@ class AudioEngine:
 
         if not user.voice or not user.voice.channel:
             await interaction.response.send_message(
-                ":x: You need to be in a voice channel to use this command.", ephemeral=True
+                ":x: You need to be in a voice channel to use this command.",
+                ephemeral=True,
             )
             return None
 
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None or not voice_client.is_connected() or voice_client.channel is None:
+        session = self.sessions.get(guild_id)
+        voice_client = session.voice_client if session else None
+        if (
+            voice_client is None
+            or not voice_client.is_connected()
+            or voice_client.channel is None
+        ):
             await interaction.response.send_message(
                 ":x: The bot is not connected to a voice channel.", ephemeral=True
             )
@@ -233,35 +256,30 @@ class AudioEngine:
 
         return voice_client
 
-    async def play_song(
-        self,
-        guild_id: int,
-        source_url: str,
-        stream_url: str | None,
-        title: str,
-        duration: str,
-        refresh_stream: StreamResolver | None = None,
-    ) -> bool:
-        if not stream_url and refresh_stream is not None:
+    async def play_song(self, guild_id: int, item: QueueItem) -> bool:
+        stream_url = item.stream_url
+        if not stream_url and item.refresh_stream is not None:
             try:
-                stream_url = await refresh_stream(source_url)
+                stream_url = await item.refresh_stream(item.source_url)
             except Exception as error:  # pylint: disable=broad-exception-caught
-                logger.error("Could not refresh URL for %s: %s", title, error)
+                logger.error("Could not refresh URL for %s: %s", item.title, error)
                 self.play_next(guild_id)
                 return False
 
         if not stream_url:
-            logger.error("No playable stream URL found for %s", title)
+            logger.error("No playable stream URL found for %s", item.title)
             self.play_next(guild_id)
             return False
 
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None or not voice_client.is_connected():
-            logger.warning("Voice client disappeared before playback in guild %s", guild_id)
+        session = self.sessions.get(guild_id)
+        if session is None or not session.voice_client.is_connected():
+            logger.warning(
+                "Voice client disappeared before playback in guild %s", guild_id
+            )
             await self.disconnect_and_cleanup(guild_id)
             return False
 
-        self.currently_playing[guild_id] = (title, duration)
+        session.current = item
         source = None
         try:
             source = FFmpegOpusAudio(
@@ -272,7 +290,7 @@ class AudioEngine:
                 ),
                 options="-vn",
             )
-            voice_client.play(
+            session.voice_client.play(
                 source,
                 after=lambda error: self.play_next(guild_id, error),
             )
@@ -284,50 +302,47 @@ class AudioEngine:
             self.play_next(guild_id, error)
             return False
 
-    async def disconnect_and_cleanup(self, guild_id: int):
-        if voice_client := self.voice_clients.pop(guild_id, None):
+    async def disconnect_and_cleanup(self, guild_id: int) -> None:
+        if session := self.sessions.pop(guild_id, None):
             try:
-                voice_client.stop()
-                if voice_client.is_connected():
-                    await voice_client.disconnect()
+                session.voice_client.stop()
+                if session.voice_client.is_connected():
+                    await session.voice_client.disconnect()
             except Exception as error:  # pylint: disable=broad-exception-caught
-                logger.error("Error during disconnect for guild %s: %s", guild_id, error)
+                logger.error(
+                    "Error during disconnect for guild %s: %s", guild_id, error
+                )
 
-        self.queues.pop(guild_id, None)
-        self.command_channels.pop(guild_id, None)
-        self.currently_playing.pop(guild_id, None)
-
-    def play_next(self, guild_id: int, error=None):
+    def play_next(self, guild_id: int, error=None) -> None:
         if error:
             logger.error("Player error for guild %s: %s", guild_id, error)
 
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None or not voice_client.is_connected():
-            run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
+        session = self.sessions.get(guild_id)
+        if session is None or not session.voice_client.is_connected():
+            run_coroutine_threadsafe(
+                self.disconnect_and_cleanup(guild_id), self.bot.loop
+            )
             return
 
-        queue = self.queues.get(guild_id)
-        if queue:
-            item = queue.popleft()
-            coro = self.play_next_track_and_announce(guild_id, item)
-            run_coroutine_threadsafe(coro, self.bot.loop)
+        if session.queue:
+            item = session.queue.popleft()
+            run_coroutine_threadsafe(
+                self.play_next_track_and_announce(guild_id, item), self.bot.loop
+            )
             return
 
-        self.currently_playing.pop(guild_id, None)
+        session.current = None
         run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
-
-    def unload(self):
-        for guild_id in list(self.voice_clients):
-            run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
 
     async def handle_voice_state_update(
         self, member: Member, before: VoiceState, after: VoiceState
-    ):
+    ) -> None:
         guild_id = member.guild.id
-        voice_client = self.voice_clients.get(guild_id)
-        if voice_client is None:
+        session = self.sessions.get(guild_id)
+        if session is None:
             return
 
+        voice_client = session.voice_client
         if not voice_client.is_connected() or not voice_client.channel:
             await self.disconnect_and_cleanup(guild_id)
             return
@@ -342,7 +357,10 @@ class AudioEngine:
                 await self.disconnect_and_cleanup(guild_id)
             return
 
-        if before.channel == voice_client.channel and after.channel != voice_client.channel:
+        if (
+            before.channel == voice_client.channel
+            and after.channel != voice_client.channel
+        ):
             if (
                 len(voice_client.channel.members) == 1
                 and voice_client.channel.members[0] == self.bot.user

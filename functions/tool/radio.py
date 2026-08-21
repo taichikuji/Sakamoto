@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from random import choice, sample
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
@@ -6,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 from discord import Interaction, Member, app_commands
 from discord.ext import commands
 
-from ._audio_engine import get_audio_engine
+from ._audio_engine import QueueItem, get_audio_engine
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -14,7 +15,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class RadioCog(commands.GroupCog, group_name="radio", group_description="Play radio stations."):
+@dataclass(frozen=True)
+class RadioStation:
+    channel_id: str
+    title: str
+
+
+class RadioCog(
+    commands.GroupCog, group_name="radio", group_description="Play radio stations."
+):
     """Groupped radio based commands."""
 
     RADIO_ENDPOINT = "https://radio.garden/api"
@@ -30,7 +39,9 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
         if len(query) < 2:
             return []
 
-        payload = await self.fetch_json(f"{self.RADIO_ENDPOINT}/search", params={"q": query})
+        payload = await self.fetch_json(
+            f"{self.RADIO_ENDPOINT}/search", params={"q": query}
+        )
         hits = (payload or {}).get("hits", {}).get("hits") or []
 
         choices: list[app_commands.Choice[str]] = []
@@ -52,7 +63,9 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
             label = f"{title} ({subtitle})" if subtitle else title
 
             choices.append(
-                app_commands.Choice(name=label[:100] or "Unknown Station", value=value[:100])
+                app_commands.Choice(
+                    name=label[:100] or "Unknown Station", value=value[:100]
+                )
             )
 
             if len(choices) == 5:
@@ -67,7 +80,8 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
     async def search(self, interaction: Interaction, query: str):
         if not query or not query.strip():
             await interaction.response.send_message(
-                ":x: You must provide a station query, URL, or channel ID.", ephemeral=True
+                ":x: You must provide a station query, URL, or channel ID.",
+                ephemeral=True,
             )
             return
         await self.play_resolved_radio_station(interaction, query)
@@ -93,7 +107,8 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
 
         if not user.voice or not user.voice.channel:
             await interaction.response.send_message(
-                ":x: You need to be in a voice channel to use this command.", ephemeral=True
+                ":x: You need to be in a voice channel to use this command.",
+                ephemeral=True,
             )
             return
 
@@ -106,50 +121,46 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
             return
 
         try:
-            channel_id, title = await self.resolve_radio_station(query)
+            station = await self.resolve_radio_station(query)
+            stream_url = await self.resolve_radio_stream_url(station.channel_id)
         except ValueError as error:
             await interaction.followup.send(f":x: {error}", ephemeral=True)
             return
         except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("radio station resolution failed: %s", error)
-            await interaction.followup.send(
-                ":x: Failed to reach radio source. Try again later.", ephemeral=True
-            )
-            return
-
-        stream_api_url = f"{self.RADIO_ENDPOINT}/ara/content/listen/{channel_id}/channel.mp3"
-        try:
-            stream_url = await self.resolve_radio_stream_url(channel_id)
-        except ValueError as error:
-            await interaction.followup.send(f":x: {error}", ephemeral=True)
-            return
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("radio stream URL resolution failed: %s", error)
+            logger.error("radio resolution failed: %s", error)
             await interaction.followup.send(
                 ":x: Failed to reach radio source. Try again later.", ephemeral=True
             )
             return
 
         if (
-            await self.engine.get_or_connect_voice_client(guild_id, user.voice.channel, interaction)
+            await self.engine.get_or_connect_voice_client(
+                guild_id, user.voice.channel, interaction
+            )
             is None
         ):
             return
 
-        self.engine.command_channels[guild_id] = channel
+        self.engine.set_command_channel(guild_id, channel)
 
         await self.engine.enqueue_or_play(
             guild_id,
-            source_url=stream_api_url,
-            title=title,
-            duration="LIVE",
-            stream_url=stream_url,
+            QueueItem(
+                source_url=self.radio_stream_url(station.channel_id),
+                title=station.title,
+                duration="LIVE",
+                stream_url=stream_url,
+            ),
             followup=interaction.followup.send,
-            now_playing_message=f":radio: Now playing: **{title}** using radio source",
-            queue_message=f":ballot_box_with_check: Added to queue: :radio: **{title}** [LIVE]",
+            now_playing_message=(
+                f":radio: Now playing: **{station.title}** using radio source"
+            ),
+            queue_message=(
+                f":ballot_box_with_check: Added to queue: :radio: **{station.title}** [LIVE]"
+            ),
         )
 
-    async def resolve_radio_station(self, query: str | None) -> tuple[str, str]:
+    async def resolve_radio_station(self, query: str | None) -> RadioStation:
         if query is None:
             return await self.pick_random_station()
 
@@ -159,21 +170,25 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
 
         if channel_id := self.extract_channel_id(raw):
             if channel := (
-                await self.fetch_json(f"{self.RADIO_ENDPOINT}/ara/content/channel/{channel_id}")
+                await self.fetch_json(
+                    f"{self.RADIO_ENDPOINT}/ara/content/channel/{channel_id}"
+                )
                 or {}
             ).get("data"):
                 title = channel.get("title") or "Unknown Station"
-                return channel_id, title
+                return RadioStation(channel_id, title)
 
         channel = await self.search_radio_channel(raw)
         if channel is None:
             raise ValueError("No radio station found for that query.")
 
         if not (channel_id := self.channel_id_from_href(channel.get("url"))):
-            raise ValueError("Could not resolve a station stream ID from search results.")
+            raise ValueError(
+                "Could not resolve a station stream ID from search results."
+            )
 
         title = channel.get("title") or "Unknown Station"
-        return channel_id, title
+        return RadioStation(channel_id, title)
 
     @staticmethod
     def extract_channel_id(value: str) -> str | None:
@@ -189,8 +204,10 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
 
         return raw
 
-    async def pick_random_station(self) -> tuple[str, str]:
-        places_payload = await self.fetch_json(f"{self.RADIO_ENDPOINT}/ara/content/places")
+    async def pick_random_station(self) -> RadioStation:
+        places_payload = await self.fetch_json(
+            f"{self.RADIO_ENDPOINT}/ara/content/places"
+        )
         places = (places_payload or {}).get("data", {}).get("list") or []
         if not places:
             raise ValueError("No radio places available.")
@@ -206,12 +223,14 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
 
             station = choice(channels)
             if not (
-                channel_id := self.channel_id_from_href(station.get("href") or station.get("url"))
+                channel_id := self.channel_id_from_href(
+                    station.get("href") or station.get("url")
+                )
             ):
                 continue
 
             title = station.get("title") or "Unknown Station"
-            return channel_id, title
+            return RadioStation(channel_id, title)
 
         raise ValueError("Could not find a random radio station. Try again.")
 
@@ -230,7 +249,7 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
         return channels
 
     async def resolve_radio_stream_url(self, channel_id: str) -> str:
-        stream_api_url = f"{self.RADIO_ENDPOINT}/ara/content/listen/{channel_id}/channel.mp3"
+        stream_api_url = self.radio_stream_url(channel_id)
         if self.bot.session is None:
             raise RuntimeError("HTTP session is not available.")
 
@@ -252,6 +271,10 @@ class RadioCog(commands.GroupCog, group_name="radio", group_description="Play ra
             raise ValueError("Could not resolve a playable radio stream.") from error
 
         raise ValueError("Could not resolve a playable radio stream.")
+
+    @classmethod
+    def radio_stream_url(cls, channel_id: str) -> str:
+        return f"{cls.RADIO_ENDPOINT}/ara/content/listen/{channel_id}/channel.mp3"
 
     async def search_radio_channel(self, query: str) -> dict | None:
         payload = await self.fetch_json(
