@@ -1,4 +1,3 @@
-from re import Pattern, compile as re_compile
 from typing import TYPE_CHECKING
 
 from discord import Message
@@ -13,44 +12,24 @@ class ReplaceCog(commands.Cog):
 
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
-        self.patterns: list[tuple[Pattern[str], str]] = [
-            (
-                re_compile(
-                    r"https?://(?:www\.)?(?:x|twitter)\.com/(?P<user>[^/\s]+)/status/"
-                    r"(?P<id>\d+)(?:\?[^ \s]*)?"
-                ),
-                r"https://fixupx.com/\g<user>/status/\g<id>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.)?(?:bsky\.social|bsky\.app)/(?P<rest>\S+)"),
-                r"https://fxbsky.app/\g<rest>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.|vm\.)?tiktok\.com/(?P<rest>\S+)"),
-                r"https://vm.tnktok.com/\g<rest>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.)?instagram\.com/(?P<rest>\S+)"),
-                r"https://kkinstagram.com/\g<rest>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.)?pixiv\.net/(?P<rest>\S+)"),
-                r"https://phixiv.net/\g<rest>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.)?youtube\.com/shorts/(?P<rest>\S+)"),
-                r"https://youtu.be/\g<rest>",
-            ),
-            (
-                re_compile(r"https?://(?:www\.)?reddit\.com/(?P<rest>\S+)"),
-                r"https://vxreddit.com/\g<rest>",
-            ),
-        ]
+        self.replacements = {
+            "x.com": "fixupx.com",
+            "twitter.com": "fixupx.com",
+            "bsky.social": "fxbsky.app",
+            "bsky.app": "fxbsky.app",
+            "tiktok.com": "vm.tnktok.com",
+            "vm.tiktok.com": "vm.tnktok.com",
+            "instagram.com": "kkinstagram.com",
+            "pixiv.net": "phixiv.net",
+            "youtube.com/shorts": "youtu.be",
+            "reddit.com": "vxreddit.com",
+        }
 
     def replace_text(self, text: str) -> str:
         """Rewrite supported URLs in text."""
-        for pattern, repl in self.patterns:
-            text = pattern.sub(repl, text)
+        for source, target in self.replacements.items():
+            for prefix in ("http://", "http://www.", "https://", "https://www."):
+                text = text.replace(f"{prefix}{source}/", f"https://{target}/")
         return text
 
     @commands.Cog.listener()
