@@ -756,6 +756,28 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_play_reports_voice_connection_exception(monkeypatch):
+    voice_channel = DummyVoiceChannel()
+    interaction = _make_interaction(
+        user=DummyMember(42, voice_channel=voice_channel), guild_id=1
+    )
+    cog = MusicCog(_make_bot())
+    cog.engine.get_or_connect_voice_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
+    cog.resolve_source = AsyncMock(return_value={"url": "https://stream.test/live"})
+    cog.engine.enqueue_or_play = AsyncMock()
+    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+
+    await MusicCog.play.callback(cog, interaction, query="track")
+
+    cog.engine.enqueue_or_play.assert_not_awaited()
+    interaction.followup.send.assert_awaited_once_with(
+        ":x: Failed to retrieve audio. Error: connection failed", ephemeral=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
     connected_client = DummyVoiceClient(connected=True)
     voice_channel = DummyVoiceChannel(connected_client=connected_client)
@@ -870,6 +892,40 @@ async def test_resolve_source_reuses_cached_query_and_stream_url(monkeypatch):
     assert await cog.refresh_stream_url(source_url) == stream_url
     assert "expired" not in cog.source_cache
     cog.search_source.assert_called_once_with("Track")
+
+
+@pytest.mark.asyncio
+async def test_resolve_source_reuses_in_flight_query(monkeypatch):
+    cog = MusicCog(_make_bot())
+    started = asyncio.Event()
+    release = asyncio.Event()
+    info = {"url": f"https://stream.test/audio?expire={int(time()) + 3600}"}
+
+    class LookupLoop:
+        calls = 0
+
+        def run_in_executor(self, _executor, _function, _argument):
+            self.calls += 1
+
+            async def lookup():
+                started.set()
+                await release.wait()
+                return info
+
+            return asyncio.create_task(lookup())
+
+    loop = LookupLoop()
+    monkeypatch.setattr("functions.tool.music.get_running_loop", lambda: loop)
+
+    first = asyncio.create_task(cog.resolve_source("Track"))
+    await started.wait()
+    second = asyncio.create_task(cog.resolve_source(" track "))
+    await asyncio.sleep(0)
+    release.set()
+
+    assert await asyncio.gather(first, second) == [info, info]
+    assert loop.calls == 1
+    assert cog.source_lookups == {}
 
 
 @pytest.mark.asyncio
