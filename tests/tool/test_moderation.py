@@ -133,9 +133,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     author_channel = SimpleNamespace(id=1, members=[])
     target_channel = SimpleNamespace(id=2, members=[])
     interaction = _make_interaction(user=DummyMember(1, channel=author_channel), guild=object())
-    await ModerationCog.votekick.callback(
-        cog, interaction, DummyMember(2, channel=target_channel)
-    )
+    await ModerationCog.votekick.callback(cog, interaction, DummyMember(2, channel=target_channel))
     interaction.response.send_message.assert_awaited_with(
         ":x: <@2> is not in your voice channel.", ephemeral=True
     )
@@ -162,7 +160,7 @@ async def test_votekick_command_happy_path_tracks_and_clears_state(monkeypatch):
     monkeypatch.setattr("functions.tool.moderation.Member", DummyMember)
     monkeypatch.setattr("functions.tool.moderation.VotekickView.wait", AsyncMock())
 
-    bot = SimpleNamespace(color=0xabcdef)
+    bot = SimpleNamespace(color=0xABCDEF)
     cog = ModerationCog(bot)
 
     voice_channel = SimpleNamespace(members=[])

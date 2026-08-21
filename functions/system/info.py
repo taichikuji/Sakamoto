@@ -10,7 +10,10 @@ from psutil import Process
 if TYPE_CHECKING:
     from main import Sakamoto
 
+
 class InfoCog(commands.Cog):
+    """Cog that reports runtime information."""
+
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
 
@@ -19,10 +22,12 @@ class InfoCog(commands.Cog):
         description="Show information about the bot, including versions, uptime, and memory usage.",
     )
     async def info(self, interaction: Interaction):
+        """Send the bot information embed."""
         embed = await self.create_embed()
         await interaction.response.send_message(embed=embed)
 
     async def create_embed(self):
+        """Build the bot information embed."""
         embed_data = {
             "title": ":information_source: Bot's Info",
             "description": "Here's some information about me and my dependencies!",
@@ -46,12 +51,14 @@ class InfoCog(commands.Cog):
 
     @staticmethod
     async def _get_mem_usage():
+        """Return current process memory usage."""
         process = Process(getpid())
         mem_usage = float(process.memory_info().rss) / 1000000
         child_count = len(process.children(recursive=True))
         return f"{round(mem_usage, 2)} MB\nChild processes: {child_count}"
 
     async def uptime(self):
+        """Return the current process uptime."""
         start_time_timestamp = Process(getpid()).create_time()
         current_time_timestamp = time.time()
         uptime_seconds = int(current_time_timestamp - start_time_timestamp)
@@ -59,5 +66,7 @@ class InfoCog(commands.Cog):
         uptime_minutes = (uptime_seconds % 3600) // 60
         return f"{uptime_hours} hours, {uptime_minutes} minutes"
 
+
 async def setup(bot: "Sakamoto"):
+    """Add the InfoCog to the bot."""
     await bot.add_cog(InfoCog(bot))

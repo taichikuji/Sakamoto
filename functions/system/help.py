@@ -8,6 +8,8 @@ if TYPE_CHECKING:
 
 
 class HelpCog(commands.Cog):
+    """Cog that displays command help."""
+
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
 
@@ -16,6 +18,7 @@ class HelpCog(commands.Cog):
         description="Shows a list of available commands or details about a specific command.",
     )
     async def show_help(self, interaction: Interaction, command_name: str | None = None):
+        """Show the command list or a named command's description."""
         if command_name is None:
             embed = Embed(
                 title="Help",
@@ -44,4 +47,5 @@ class HelpCog(commands.Cog):
 
 
 async def setup(bot: "Sakamoto"):
+    """Add the HelpCog to the bot."""
     await bot.add_cog(HelpCog(bot))
