@@ -224,7 +224,7 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
     await SteamCog.link_steam.callback(cog, interaction, "alice")
     cog._save_steam_link.assert_awaited_once_with(7, "76561198000000007")
     interaction.followup.send.assert_awaited_with(
-        ":white_check_mark: Your Discord account has been successfully linked to SteamID: `76561198000000007`."
+        ":white_check_mark: Your Discord account is linked to SteamID: `76561198000000007`."
     )
 
 
