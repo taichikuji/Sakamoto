@@ -1,5 +1,5 @@
 import logging
-from asyncio import gather, get_running_loop
+from asyncio import Future, gather, get_running_loop
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +24,7 @@ class MusicCog(commands.Cog):
         self.bot = bot
         self.engine = get_audio_engine(bot)
         self.source_cache: dict[str, tuple[float, dict]] = {}
+        self.source_lookups: dict[str, Future[dict]] = {}
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.guild_id is not None:
@@ -102,6 +103,8 @@ class MusicCog(commands.Cog):
         try:
             # Delay source errors until here so the normal cleanup below can disconnect
             # a voice client that was created while the lookup was running.
+            if isinstance(voice_client, Exception):
+                raise voice_client
             if isinstance(info, Exception):
                 raise info
             self.engine.set_command_channel(guild_id, cast(Messageable, channel))
@@ -163,7 +166,15 @@ class MusicCog(commands.Cog):
         if (cached := self.source_cache.get(key)) and cached[0] > time():
             return cached[1]
 
-        info = await get_running_loop().run_in_executor(None, self.search_source, query)
+        if lookup := self.source_lookups.get(key):
+            return await lookup
+
+        lookup = get_running_loop().run_in_executor(None, self.search_source, query)
+        self.source_lookups[key] = lookup
+        try:
+            info = await lookup
+        finally:
+            self.source_lookups.pop(key, None)
         is_playlist = self.is_url(query) and info.get("_type") in [
             "playlist",
             "multi_video",
