@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from discord import Embed, Interaction, app_commands
 from discord.ext import commands
-from psutil import Process
+from psutil import Error, Process
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -51,11 +51,24 @@ class InfoCog(commands.Cog):
 
     @staticmethod
     async def _get_mem_usage():
-        """Return current process memory usage."""
+        """Return RSS for the bot and its live child processes."""
         process = Process(getpid())
-        mem_usage = float(process.memory_info().rss) / 1000000
-        child_count = len(process.children(recursive=True))
-        return f"{round(mem_usage, 2)} MB\nChild processes: {child_count}"
+        bot_rss = process.memory_info().rss
+        child_rss = 0
+        child_count = 0
+        for child in process.children(recursive=True):
+            try:
+                child_rss += child.memory_info().rss
+                child_count += 1
+            except Error:
+                continue
+
+        mib = 1024**2
+        return (
+            f"Total RSS: {(bot_rss + child_rss) / mib:.2f} MiB\n"
+            f"Bot: {bot_rss / mib:.2f} MiB\n"
+            f"Children ({child_count}): {child_rss / mib:.2f} MiB"
+        )
 
     async def uptime(self):
         """Return the current process uptime."""

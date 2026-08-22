@@ -929,6 +929,37 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resolve_source_clears_failed_in_flight_lookup(monkeypatch):
+    cog = MusicCog(_make_bot())
+    cog.search_source = MagicMock(side_effect=RuntimeError("lookup failed"))
+    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+
+    with pytest.raises(RuntimeError, match="lookup failed"):
+        await cog.resolve_source("Track")
+
+    assert cog.source_lookups == {}
+
+
+@pytest.mark.asyncio
+async def test_source_cache_stops_at_256_keys(monkeypatch):
+    cog = MusicCog(_make_bot())
+    expires_at = int(time()) + 3600
+    cog.search_source = MagicMock(
+        side_effect=lambda query: {
+            "url": f"https://stream.test/{query}?expire={expires_at}"
+        }
+    )
+    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+
+    for index in range(130):
+        await cog.resolve_source(f"Track {index}")
+
+    assert len(cog.source_cache) == 256
+    assert "track 0" not in cog.source_cache
+    assert "track 129" in cog.source_cache
+
+
+@pytest.mark.asyncio
 async def test_resolve_source_refreshes_an_expired_stream_url(monkeypatch):
     cog = MusicCog(_make_bot())
     expired = {"url": f"https://stream.test/audio?expire={int(time()) - 1}"}
