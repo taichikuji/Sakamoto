@@ -183,6 +183,9 @@ class SteamCog(
     @app_commands.command(
         name="link", description="Link your Discord account to a Steam ID or vanity URL."
     )
+    @app_commands.describe(
+        steam_identifier="SteamID64, Steam profile URL, or vanity name."
+    )
     async def link_steam(self, interaction: Interaction, steam_identifier: str):
         await interaction.response.defer(ephemeral=True)
 

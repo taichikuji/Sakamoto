@@ -19,6 +19,10 @@ class ClearCog(commands.Cog):
     @app_commands.command(
         name="clear", description="Remove messages in bulk. Defaults to 1 message."
     )
+    @app_commands.describe(
+        amount="Number of messages to scan and remove. Defaults to 1.",
+        user="Only remove messages authored by this member.",
+    )
     @app_commands.checks.has_permissions(manage_messages=True)
     async def clear(
         self, interaction: Interaction, amount: int = 1, user: Member | None = None

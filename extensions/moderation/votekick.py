@@ -141,6 +141,7 @@ class ModerationCog(commands.Cog):
     @app_commands.command(
         name="votekick", description="Start a vote to kick a user from the current voice channel."
     )
+    @app_commands.describe(member="Member to vote to remove from the current voice channel.")
     # Guard clauses keep each rejected Voice Votekick case self-contained.
     # pylint: disable=too-many-return-statements
     async def votekick(self, interaction: Interaction, member: Member):
