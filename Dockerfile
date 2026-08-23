@@ -32,7 +32,7 @@ RUN groupadd --gid 10001 sakamoto && \
     chown sakamoto:sakamoto data
 
 COPY --chown=sakamoto:sakamoto main.py ./
-COPY --chown=sakamoto:sakamoto functions ./functions/
+COPY --chown=sakamoto:sakamoto extensions ./extensions/
 
 USER sakamoto
 

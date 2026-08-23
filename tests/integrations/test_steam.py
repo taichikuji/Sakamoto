@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool.steam import SteamCog
+from extensions.integrations.steam import SteamCog
 
 
 class DummyResponse:
@@ -98,7 +98,7 @@ def test_steam_http_error_messages_are_status_specific(tmp_path, status, detail)
 
 @pytest.mark.asyncio
 async def test_resolve_steam_id_returns_direct_profile_id(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     bot = DummyBot(db_path=tmp_path / "steam.db", session=DummySession([]))
     cog = SteamCog(bot)
 
@@ -109,7 +109,7 @@ async def test_resolve_steam_id_returns_direct_profile_id(monkeypatch, tmp_path)
 
 @pytest.mark.asyncio
 async def test_resolve_steam_id_extracts_profiles_url(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     bot = DummyBot(db_path=tmp_path / "steam.db", session=DummySession([]))
     cog = SteamCog(bot)
 
@@ -120,7 +120,7 @@ async def test_resolve_steam_id_extracts_profiles_url(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_resolve_steam_id_resolves_vanity_via_api(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     session = DummySession(
         [
             DummyResponse(
@@ -140,7 +140,7 @@ async def test_resolve_steam_id_resolves_vanity_via_api(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     no_session_bot = DummyBot(db_path=tmp_path / "a.db", session=None)
     no_session_cog = SteamCog(no_session_bot)
     assert await no_session_cog._resolve_steam_id("alice") == (
@@ -148,7 +148,7 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
         ":x: The bot's HTTP session is not ready. Please try again later.",
     )
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", None)
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", None)
     tokenless_bot = DummyBot(db_path=tmp_path / "b.db", session=DummySession([]))
     tokenless_cog = SteamCog(tokenless_bot)
     assert await tokenless_cog._resolve_steam_id("alice") == (
@@ -156,7 +156,7 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
         ":x: The bot's Steam API key is not configured. Please contact the bot owner.",
     )
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     non_200_bot = DummyBot(
         db_path=tmp_path / "c.db",
         session=DummySession([DummyResponse(500, {"response": {}})]),
@@ -192,14 +192,14 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
 async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
     interaction = _make_interaction()
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", None)
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", None)
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam.db", session=DummySession([])))
     await SteamCog.link_steam.callback(cog, interaction, "alice")
     interaction.followup.send.assert_awaited_with(
         ":x: The bot's Steam API key is not configured. Linking is currently unavailable. Please contact the bot owner."
     )
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     interaction = _make_interaction()
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam2.db", session=None))
     await SteamCog.link_steam.callback(cog, interaction, "alice")
@@ -232,14 +232,14 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
 async def test_get_lobby_guardrails(monkeypatch, tmp_path):
     interaction = _make_interaction()
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", None)
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", None)
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam.db", session=DummySession([])))
     await SteamCog.get_lobby.callback(cog, interaction)
     interaction.followup.send.assert_awaited_with(
         ":x: The bot's Steam API key is not configured. Lobby fetching is unavailable. Please contact the bot owner."
     )
 
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     interaction = _make_interaction()
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam2.db", session=None))
     await SteamCog.get_lobby.callback(cog, interaction)
@@ -259,7 +259,7 @@ async def test_get_lobby_guardrails(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     interaction = _make_interaction()
 
     # HTTP failure
@@ -314,7 +314,7 @@ async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_lobby_success_sends_embed_with_redirect_url(monkeypatch, tmp_path):
-    monkeypatch.setattr("functions.tool.steam.STEAM_TOKEN", "token")
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     interaction = _make_interaction(user_id=44)
     session = DummySession(
         [

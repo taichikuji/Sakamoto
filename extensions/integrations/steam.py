@@ -329,7 +329,7 @@ class SteamCog(
 async def setup(bot: "Sakamoto"):
     if not STEAM_TOKEN:
         raise commands.ExtensionFailed(
-            name="functions.tool.steam",
+            name="extensions.integrations.steam",
             original=RuntimeError("STEAM_TOKEN environment variable is not set."),
         )
     await bot.add_cog(SteamCog(bot))

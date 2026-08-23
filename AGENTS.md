@@ -13,9 +13,9 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 
 ## Structure
 
-- Extensions: `functions/system/` (system/admin) and `functions/tool/` (user-facing).
+- Extensions: `extensions/core/` (always-on administration) and domain folders such as `extensions/audio/` and `extensions/moderation/`.
 - Files beginning with `_` are internal and are not extensions.
-- Music changes require reviewing `functions/tool/music.py` and `functions/tool/_audio_engine.py`.
+- Music changes require reviewing `extensions/audio/music.py` and `extensions/audio/_audio_engine.py`.
   - Keep provider/source resolution in `music.py`.
   - Keep generic voice, queue, and playback state in `_audio_engine.py`.
 

@@ -8,7 +8,7 @@ from discord.ext import commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.system.sync import SyncCog
+from extensions.core.sync import SyncCog
 
 
 class DummyHTTPException(Exception):
@@ -41,7 +41,7 @@ async def test_sync_scope_returns_no_commands_message_for_empty_result():
 
 @pytest.mark.asyncio
 async def test_sync_scope_formats_http_exception(monkeypatch):
-    monkeypatch.setattr("functions.system.sync.HTTPException", DummyHTTPException)
+    monkeypatch.setattr("extensions.core.sync.HTTPException", DummyHTTPException)
     bot = SimpleNamespace(
         tree=SimpleNamespace(sync=AsyncMock(side_effect=DummyHTTPException(429, "rate limited")))
     )
@@ -135,7 +135,7 @@ async def test_on_sync_error_logs_unexpected_errors(monkeypatch):
     ctx = SimpleNamespace(interaction=None, send=AsyncMock())
     cog = SyncCog(SimpleNamespace(tree=SimpleNamespace(sync=AsyncMock())))
     fake_logger = MagicMock()
-    monkeypatch.setattr("functions.system.sync.logger", fake_logger)
+    monkeypatch.setattr("extensions.core.sync.logger", fake_logger)
 
     await cog.on_sync_error(ctx, RuntimeError("unexpected"))
 

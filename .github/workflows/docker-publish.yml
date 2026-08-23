@@ -13,7 +13,7 @@ on:
       - 'Pipfile'
       - 'Pipfile.lock'
       - 'main.py'
-      - 'functions/**'
+      - 'extensions/**'
 
 jobs:
   build-and-publish:

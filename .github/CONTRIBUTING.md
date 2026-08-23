@@ -14,7 +14,7 @@ Create the token in the [Discord Developer Portal](https://discord.com/developer
 
 ## Changes and tests
 
-- Put extensions in `functions/system/` (administration) or `functions/tool/` (user features); follow the existing cog and `setup` pattern.
+- Put always-on administration in `extensions/core/`. Put user-facing cogs in the domain extension that owns them, such as `extensions/audio/` or `extensions/moderation/`; follow the existing cog and `setup` pattern.
 - Follow existing style, use clear names and appropriate type hints, and document non-obvious logic.
 - Update relevant documentation and tests. Before opening a PR, run the relevant tests and verify no new warnings or errors.
 
