@@ -57,6 +57,7 @@ class MusicCog(commands.Cog):
     @app_commands.command(
         name="play", description="Play a song or audio. Provide a search term or URL."
     )
+    @app_commands.describe(query="YouTube search term or supported audio URL.")
     @app_commands.autocomplete(query=play_query_autocomplete)
     async def play(self, interaction: Interaction, query: str):
         if not query:
