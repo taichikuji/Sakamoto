@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool.redirect import ReplaceCog
+from extensions.community.redirect import ReplaceCog
 
 
 @pytest.mark.parametrize(

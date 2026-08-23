@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool.moderation import ModerationCog, VotekickView
+from extensions.moderation.votekick import ModerationCog, VotekickView
 
 
 class DummyEmbed:
@@ -99,7 +99,7 @@ async def test_yes_button_successful_vote_kicks_target_and_schedules_unban(monke
     voter = DummyMember(99)
     interaction = _make_interaction(user=voter, guild=object())
 
-    monkeypatch.setattr("functions.tool.moderation.Member", DummyMember)
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
 
     await view.children[0].callback(interaction)
 
@@ -112,7 +112,7 @@ async def test_yes_button_successful_vote_kicks_target_and_schedules_unban(monke
 
 @pytest.mark.asyncio
 async def test_votekick_command_guardrails(monkeypatch):
-    monkeypatch.setattr("functions.tool.moderation.Member", DummyMember)
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
     cog = ModerationCog(SimpleNamespace(color=0x123456))
 
     # Not in a guild
@@ -157,8 +157,8 @@ async def test_votekick_command_guardrails(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_votekick_command_happy_path_tracks_and_clears_state(monkeypatch):
-    monkeypatch.setattr("functions.tool.moderation.Member", DummyMember)
-    monkeypatch.setattr("functions.tool.moderation.VotekickView.wait", AsyncMock())
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
+    monkeypatch.setattr("extensions.moderation.votekick.VotekickView.wait", AsyncMock())
 
     bot = SimpleNamespace(color=0xABCDEF)
     cog = ModerationCog(bot)

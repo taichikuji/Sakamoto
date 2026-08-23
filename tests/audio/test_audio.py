@@ -10,14 +10,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool._audio_engine import (
+from extensions.audio._audio_engine import (
     AudioEngine,
     PlaybackSession,
     QueueItem,
     get_audio_engine,
 )
-from functions.tool.music import MusicCog
-from functions.tool.radio import RadioCog, RadioStation
+from extensions.audio.music import MusicCog
+from extensions.audio.radio import RadioCog, RadioStation
 
 
 def _radio_command(name: str):
@@ -179,7 +179,7 @@ def test_audio_engine_registers_voice_listener_once():
     )
 
 
-def test_playback_sessions_are_isolated_by_guild():
+def test_audio_engine_sessions_are_isolated_by_guild():
     engine = AudioEngine(_make_bot())
     first = _add_session(
         engine,
@@ -206,7 +206,7 @@ def test_queue_operations_validate_skip_and_shuffle(monkeypatch):
         queue=[QueueItem("one", "First", "1:00"), QueueItem("two", "Second", "2:00")],
     )
     monkeypatch.setattr(
-        "functions.tool._audio_engine.shuffle", lambda items: items.reverse()
+        "extensions.audio._audio_engine.shuffle", lambda items: items.reverse()
     )
 
     assert engine.skip_tracks(1, 0) is False
@@ -254,12 +254,12 @@ async def test_play_song_returns_false_when_refreshed_stream_url_missing(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_play_song_starts_playback_and_tracks_current_song(monkeypatch):
+async def test_play_song_starts_audio_engine_and_tracks_current_song(monkeypatch):
     vc = DummyVoiceClient(connected=True)
     cog = AudioEngine(_make_bot())
     _add_session(cog, vc)
     monkeypatch.setattr(
-        "functions.tool._audio_engine.FFmpegOpusAudio",
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda stream_url, **_kw: f"audio:{stream_url}",
     )
 
@@ -274,7 +274,7 @@ async def test_play_song_starts_playback_and_tracks_current_song(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_play_song_cleans_source_when_playback_is_rejected(monkeypatch):
+async def test_play_song_cleans_source_when_audio_engine_is_rejected(monkeypatch):
     source = SimpleNamespace(cleanup=MagicMock())
     vc = DummyVoiceClient(connected=True)
     vc.play.side_effect = RuntimeError("rejected")
@@ -282,7 +282,7 @@ async def test_play_song_cleans_source_when_playback_is_rejected(monkeypatch):
     _add_session(cog, vc)
     cog.play_next = MagicMock()
     monkeypatch.setattr(
-        "functions.tool._audio_engine.FFmpegOpusAudio",
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda *_args, **_kwargs: source,
     )
 
@@ -313,7 +313,7 @@ async def test_ensure_user_in_same_voice_channel_rejects_other_channel(monkeypat
     bot_channel = object()
     other_channel = object()
     _add_session(cog, DummyVoiceClient(connected=True, channel=bot_channel))
-    monkeypatch.setattr("functions.tool._audio_engine.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio._audio_engine.Member", DummyMember)
     interaction = _make_interaction(
         user=DummyMember(42, voice_channel=other_channel), guild_id=1
     )
@@ -349,7 +349,7 @@ async def test_control_commands_return_early_when_same_channel_check_fails(comma
 def test_play_next_returns_without_voice_client(monkeypatch):
     cog = AudioEngine(_make_bot())
     monkeypatch.setattr(
-        "functions.tool._audio_engine.run_coroutine_threadsafe",
+        "extensions.audio._audio_engine.run_coroutine_threadsafe",
         lambda coro, _loop: coro.close(),
     )
     cog.play_next(123)
@@ -612,7 +612,7 @@ async def test_radio_does_not_join_voice_when_station_resolution_fails(monkeypat
     )
     radio.resolve_radio_stream_url = AsyncMock()
     radio.engine.get_or_connect_voice_client = AsyncMock()
-    monkeypatch.setattr("functions.tool.radio.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.radio.Member", DummyMember)
 
     await _radio_command("search").callback(radio, interaction, query="missing")
 
@@ -641,7 +641,7 @@ async def test_radio_does_not_join_voice_when_stream_resolution_fails(monkeypatc
         side_effect=ValueError("Could not resolve a playable radio stream.")
     )
     radio.engine.get_or_connect_voice_client = AsyncMock()
-    monkeypatch.setattr("functions.tool.radio.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.radio.Member", DummyMember)
 
     await _radio_command("search").callback(radio, interaction, query="flaixbac")
 
@@ -668,7 +668,7 @@ async def test_radio_balloon_uses_random_station_path(monkeypatch):
     )
     radio.resolve_radio_stream_url = AsyncMock(return_value="https://stream.test/live")
     radio.engine.enqueue_or_play = AsyncMock()
-    monkeypatch.setattr("functions.tool.radio.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.radio.Member", DummyMember)
 
     await _radio_command("balloon").callback(radio, interaction)
 
@@ -690,7 +690,7 @@ async def test_play_connects_before_enqueue(monkeypatch):
     )
     cog = MusicCog(_make_bot())
     cog.engine.enqueue_or_play = AsyncMock()
-    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
 
     async def lookup(_executor, _fn, _arg):
         events.append("lookup")
@@ -702,7 +702,7 @@ async def test_play_connects_before_enqueue(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "functions.tool.music.get_running_loop",
+        "extensions.audio.music.get_running_loop",
         lambda: SimpleNamespace(run_in_executor=lookup),
     )
 
@@ -725,7 +725,7 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
     cog.engine.enqueue_or_play = AsyncMock()
     connection_started = asyncio.Event()
     lookup_started = asyncio.Event()
-    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
 
     async def connect(**_kwargs):
         connection_started.set()
@@ -744,7 +744,7 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
 
     voice_channel.connect.side_effect = connect
     monkeypatch.setattr(
-        "functions.tool.music.get_running_loop",
+        "extensions.audio.music.get_running_loop",
         lambda: SimpleNamespace(run_in_executor=lookup),
     )
 
@@ -767,7 +767,7 @@ async def test_play_reports_voice_connection_exception(monkeypatch):
     )
     cog.resolve_source = AsyncMock(return_value={"url": "https://stream.test/live"})
     cog.engine.enqueue_or_play = AsyncMock()
-    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
 
     await MusicCog.play.callback(cog, interaction, query="track")
 
@@ -785,9 +785,9 @@ async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
     )
     cog = MusicCog(_make_bot())
-    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
     monkeypatch.setattr(
-        "functions.tool.music.get_running_loop", lambda: DummyLoop(None)
+        "extensions.audio.music.get_running_loop", lambda: DummyLoop(None)
     )
 
     await MusicCog.play.callback(cog, interaction, query="missing")
@@ -807,9 +807,9 @@ async def test_play_keeps_existing_connection_when_source_lookup_fails(monkeypat
     )
     cog = MusicCog(_make_bot())
     _add_session(cog.engine, connected_client)
-    monkeypatch.setattr("functions.tool.music.Member", DummyMember)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
     monkeypatch.setattr(
-        "functions.tool.music.get_running_loop", lambda: DummyLoop(None)
+        "extensions.audio.music.get_running_loop", lambda: DummyLoop(None)
     )
 
     await MusicCog.play.callback(cog, interaction, query="missing")
@@ -850,7 +850,7 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
         {"entries": []},
     ]
     youtube_dl = MagicMock(return_value=ydl)
-    monkeypatch.setattr("functions.tool.music.YoutubeDL", youtube_dl)
+    monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
     cog = MusicCog(_make_bot())
 
     assert cog.search_source("track") == {
@@ -885,7 +885,7 @@ async def test_resolve_source_reuses_cached_query_and_stream_url(monkeypatch):
         ]
     }
     cog.search_source = MagicMock(return_value=info)
-    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
 
     assert await cog.resolve_source("Track") is info
     assert await cog.resolve_source("track") is info
@@ -915,7 +915,7 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
             return asyncio.create_task(lookup())
 
     loop = LookupLoop()
-    monkeypatch.setattr("functions.tool.music.get_running_loop", lambda: loop)
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", lambda: loop)
 
     first = asyncio.create_task(cog.resolve_source("Track"))
     await started.wait()
@@ -932,7 +932,7 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
 async def test_resolve_source_clears_failed_in_flight_lookup(monkeypatch):
     cog = MusicCog(_make_bot())
     cog.search_source = MagicMock(side_effect=RuntimeError("lookup failed"))
-    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
 
     with pytest.raises(RuntimeError, match="lookup failed"):
         await cog.resolve_source("Track")
@@ -949,7 +949,7 @@ async def test_source_cache_stops_at_256_keys(monkeypatch):
             "url": f"https://stream.test/{query}?expire={expires_at}"
         }
     )
-    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
 
     for index in range(130):
         await cog.resolve_source(f"Track {index}")
@@ -965,7 +965,7 @@ async def test_resolve_source_refreshes_an_expired_stream_url(monkeypatch):
     expired = {"url": f"https://stream.test/audio?expire={int(time()) - 1}"}
     fresh = {"url": f"https://stream.test/audio?expire={int(time()) + 3600}"}
     cog.search_source = MagicMock(side_effect=[expired, fresh])
-    monkeypatch.setattr("functions.tool.music.get_running_loop", ImmediateLoop)
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
 
     assert await cog.resolve_source("https://example.test/track") is expired
     assert await cog.resolve_source("https://example.test/track") is fresh
@@ -1079,14 +1079,14 @@ async def test_enqueue_or_play_queues_when_playing():
 
 
 @pytest.mark.asyncio
-async def test_queued_track_refreshes_stream_url_before_playback(monkeypatch):
+async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch):
     vc = DummyVoiceClient(connected=True, playing=True)
     cog = AudioEngine(_make_bot())
     session = _add_session(cog, vc)
     followup = AsyncMock()
     refresh_stream = AsyncMock(return_value="https://stream.test/fresh")
     monkeypatch.setattr(
-        "functions.tool._audio_engine.FFmpegOpusAudio",
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda stream_url, **_kw: f"audio:{stream_url}",
     )
 
@@ -1225,7 +1225,7 @@ async def test_play_next_pulls_from_queue(monkeypatch):
         scheduled.append(coro)
 
     monkeypatch.setattr(
-        "functions.tool._audio_engine.run_coroutine_threadsafe", fake_run
+        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
     )
     cog.play_next(1)
     await scheduled[0]
@@ -1250,7 +1250,7 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
         scheduled.append(coro)
 
     monkeypatch.setattr(
-        "functions.tool._audio_engine.run_coroutine_threadsafe", fake_run
+        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
     )
     cog.play_next(1)
     await scheduled[0]

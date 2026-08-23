@@ -33,7 +33,7 @@ class Sakamoto(commands.AutoShardedBot):
     async def setup_hook(self):
         self.session = ClientSession()
 
-        for ext in Path("functions").rglob("*.py"):
+        for ext in Path("extensions").rglob("*.py"):
             if ext.name.startswith("_"):
                 continue
             module = ".".join(ext.with_suffix("").parts)

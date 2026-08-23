@@ -41,7 +41,12 @@ export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 pipenv run python main.py
 ```
 
-Extensions live in `functions/`: `system/` for administration and `tool/` for user-facing features. See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
+Extensions live in `extensions/`, grouped by responsibility:
+
+- `core/` contains always-on administration such as loading, syncing, and shutdown.
+- `audio/`, `moderation/`, `community/`, `integrations/`, and `general/` contain user-facing domains.
+
+See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
 
 ## Dependencies
 

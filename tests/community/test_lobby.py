@@ -9,7 +9,7 @@ from discord import PermissionOverwrite
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from functions.tool.lobby import LobbyCog, RenameModal, VoiceControlView
+from extensions.community.lobby import LobbyCog, RenameModal, VoiceControlView
 
 
 def test_set_generator_keeps_optional_channel_description():

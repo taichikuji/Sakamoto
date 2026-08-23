@@ -22,7 +22,7 @@ class LoaderCog(commands.Cog):
     async def load(self, interaction: Interaction, extension: str) -> None:
         """Load a bot extension."""
         try:
-            await self.bot.load_extension(f"functions.{extension}")
+            await self.bot.load_extension(f"extensions.{extension}")
             logger.info(
                 "%s loaded at %s.",
                 extension,
@@ -47,7 +47,7 @@ class LoaderCog(commands.Cog):
     async def unload(self, interaction: Interaction, extension: str) -> None:
         """Unload a bot extension."""
         try:
-            await self.bot.unload_extension(f"functions.{extension}")
+            await self.bot.unload_extension(f"extensions.{extension}")
             description = f":white_check_mark: Unloaded extension '{extension}' successfully."
         except commands.ExtensionNotLoaded:
             description = f":information_source: Extension '{extension}' is not loaded."
@@ -61,7 +61,7 @@ class LoaderCog(commands.Cog):
     async def reload(self, interaction: Interaction, extension: str) -> None:
         """Reload a bot extension."""
         try:
-            await self.bot.reload_extension(f"functions.{extension}")
+            await self.bot.reload_extension(f"extensions.{extension}")
             logger.info(
                 "%s reloaded at %s.",
                 extension,
