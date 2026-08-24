@@ -11,7 +11,7 @@ def command_usage(command: app_commands.Command) -> str:
     """Return slash-command usage from Discord's registered parameters."""
     parameters = [
         f"<{parameter.name}>" if parameter.required else f"[{parameter.name}]"
-        for parameter in command.parameters.values()
+        for parameter in command.parameters
     ]
     return " ".join((f"/{command.qualified_name}", *parameters))
 
@@ -19,7 +19,7 @@ def command_usage(command: app_commands.Command) -> str:
 def parameter_details(command: app_commands.Command) -> str:
     """Return parameter descriptions and defaults from command metadata."""
     details = []
-    for parameter in command.parameters.values():
+    for parameter in command.parameters:
         description = parameter.description or "No description provided."
         if not parameter.required and parameter.default is not None:
             description += f" Default: `{parameter.default}`."
@@ -39,11 +39,25 @@ class HelpCog(commands.Cog):
     def __init__(self, bot: "Sakamoto"):
         self.bot = bot
 
+    async def command_name_autocomplete(
+        self, _interaction: Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Suggest commands and subcommands matching the current input."""
+        query = normalize_command_name(current)
+        return [
+            app_commands.Choice(
+                name=f"/{command.qualified_name}", value=command.qualified_name
+            )
+            for command in self.bot.tree.walk_commands()
+            if query in command.qualified_name.casefold()
+        ][:25]
+
     @app_commands.command(
         name="help",
         description="Shows a list of available commands or details about a specific command.",
     )
     @app_commands.describe(command_name="Command or subcommand to describe, such as `play`.")
+    @app_commands.autocomplete(command_name=command_name_autocomplete)
     async def show_help(self, interaction: Interaction, command_name: str | None = None):
         """Show the command overview or a named command's usage."""
         if command_name is None:

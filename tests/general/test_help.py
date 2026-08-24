@@ -2,7 +2,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from extensions.general.help import command_usage, normalize_command_name, parameter_details
+from extensions.general.help import (
+    HelpCog,
+    command_usage,
+    normalize_command_name,
+    parameter_details,
+)
 
 
 @pytest.mark.parametrize(
@@ -20,20 +25,20 @@ def test_normalize_command_name(value, expected):
 def test_command_usage_and_parameter_details_come_from_command_metadata():
     command = SimpleNamespace(
         qualified_name="clear",
-        parameters={
-            "amount": SimpleNamespace(
+        parameters=[
+            SimpleNamespace(
                 name="amount",
                 required=False,
                 default=1,
                 description="Number of messages to remove.",
             ),
-            "user": SimpleNamespace(
+            SimpleNamespace(
                 name="user",
                 required=False,
                 default=None,
                 description="Only remove this member's messages.",
             ),
-        },
+        ],
     )
 
     assert command_usage(command) == "/clear [amount] [user]"
@@ -41,3 +46,27 @@ def test_command_usage_and_parameter_details_come_from_command_metadata():
         "`amount` (optional) — Number of messages to remove. Default: `1`.\n"
         "`user` (optional) — Only remove this member's messages."
     )
+
+
+@pytest.mark.asyncio
+async def test_command_name_autocomplete_filters_tree_and_limits_choices():
+    commands = [
+        SimpleNamespace(qualified_name=f"command-{index}")
+        for index in range(30)
+    ]
+    commands.append(SimpleNamespace(qualified_name="radio search"))
+    bot = SimpleNamespace(
+        tree=SimpleNamespace(walk_commands=lambda: iter(commands))
+    )
+
+    choices = await HelpCog(bot).command_name_autocomplete(
+        SimpleNamespace(), "/RADIO"
+    )
+
+    assert [(choice.name, choice.value) for choice in choices] == [
+        ("/radio search", "radio search")
+    ]
+    all_choices = await HelpCog(bot).command_name_autocomplete(
+        SimpleNamespace(), ""
+    )
+    assert len(all_choices) == 25
