@@ -19,7 +19,7 @@ class ReplaceCog(commands.Cog):
             "bsky.app": "fxbsky.app",
             "tiktok.com": "vm.tnktok.com",
             "vm.tiktok.com": "vm.tnktok.com",
-            "instagram.com": "kkinstagram.com",
+            "instagram.com": "instagram7.com",
             "pixiv.net": "phixiv.net",
             "youtube.com/shorts": "youtu.be",
             "reddit.com": "vxreddit.com",

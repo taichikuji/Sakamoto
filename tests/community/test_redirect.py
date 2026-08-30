@@ -27,7 +27,7 @@ from extensions.community.redirect import ReplaceCog
         ),
         (
             "photo https://instagram.com/p/abc",
-            "photo https://kkinstagram.com/p/abc",
+            "photo https://instagram7.com/p/abc",
         ),
         (
             "art https://www.pixiv.net/en/artworks/123",
