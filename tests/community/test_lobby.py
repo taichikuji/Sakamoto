@@ -1,7 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiosqlite import connect
@@ -10,6 +10,12 @@ from discord import PermissionOverwrite
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from extensions.community.lobby import LobbyCog, RenameModal, VoiceControlView
+
+
+async def _init_test_db(cog):
+    if sys.version_info >= (3, 14):
+        pytest.skip("aiosqlite.connect() blocks under Python 3.14 in this environment")
+    await cog._init_db()
 
 
 def test_set_generator_keeps_optional_channel_description():
@@ -142,7 +148,7 @@ async def test_rename_modal_submit_edits_channel_and_sends_confirmation():
 async def test_save_and_remove_generator_updates_memory_and_database(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
-    await cog._init_db()
+    await _init_test_db(cog)
 
     await cog._save_generator(101, 202)
     assert cog.generators[101] == 202
@@ -169,7 +175,7 @@ async def test_save_and_remove_generator_updates_memory_and_database(tmp_path):
 async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
-    await cog._init_db()
+    await _init_test_db(cog)
     cog.active_channels = {11, 22}
     bot._channels[22] = object()
 
@@ -193,7 +199,7 @@ async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
 async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
-    await cog._init_db()
+    await _init_test_db(cog)
 
     class DummyMember:
         display_name = "Owner"
@@ -244,13 +250,14 @@ async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
 async def test_set_generator_set_clear_and_missing_clear_branches(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
-    await cog._init_db()
+    await _init_test_db(cog)
 
     interaction = _make_interaction(user=object(), guild_id=77)
     channel = SimpleNamespace(id=888, name="Generator VC")
 
     await LobbyCog.set_generator.callback(cog, interaction, channel)
     assert cog.generators[77] == 888
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.followup.send.assert_awaited_with(
         ":white_check_mark: **Generator VC** is now the lobby generator.", ephemeral=True
     )
@@ -306,3 +313,189 @@ async def test_voice_state_update_does_not_create_lobby_for_bot(tmp_path):
     )
 
     cog._create_lobby.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cog_load_restores_generators_and_active_lobbies(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    first_cog = LobbyCog(bot)
+    await _init_test_db(first_cog)
+    await first_cog._save_generator(11, 22)
+    async with connect(bot.db_path) as db:
+        await db.execute("INSERT INTO lobby_active (channel_id) VALUES (?)", (33,))
+        await db.commit()
+
+    restored_cog = LobbyCog(bot)
+    await restored_cog.cog_load()
+
+    assert restored_cog.generators == {11: 22}
+    assert restored_cog.active_channels == {33}
+
+
+@pytest.mark.asyncio
+async def test_on_ready_cleans_ghost_lobbies_only_once(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._cleanup_ghost_lobbies = AsyncMock()
+
+    await cog.on_ready()
+    await cog.on_ready()
+
+    cog._cleanup_ghost_lobbies.assert_awaited_once()
+
+
+def test_cog_unload_stops_and_forgets_all_control_views(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    first_view = SimpleNamespace(stop=Mock())
+    second_view = SimpleNamespace(stop=Mock())
+    cog.control_views = {1: first_view, 2: second_view}
+
+    cog.cog_unload()
+
+    first_view.stop.assert_called_once_with()
+    second_view.stop.assert_called_once_with()
+    assert cog.control_views == {}
+
+
+@pytest.mark.asyncio
+async def test_voice_state_update_ignores_state_changes_in_same_channel(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._create_lobby = AsyncMock()
+    cog._delete_lobby = AsyncMock()
+    channel = SimpleNamespace(id=42, members=[])
+    member = SimpleNamespace(bot=False)
+
+    await cog.on_voice_state_update(
+        member,
+        SimpleNamespace(channel=channel),
+        SimpleNamespace(channel=channel),
+    )
+
+    cog._create_lobby.assert_not_awaited()
+    cog._delete_lobby.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_voice_state_update_keeps_nonempty_lobby(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._delete_lobby = AsyncMock()
+    channel = SimpleNamespace(id=42, members=[object()])
+    cog.active_channels = {42}
+    member = SimpleNamespace(bot=False)
+
+    await cog.on_voice_state_update(
+        member,
+        SimpleNamespace(channel=channel),
+        SimpleNamespace(channel=None),
+    )
+
+    cog._delete_lobby.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_lobby_cleans_up_when_member_move_fails(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    await _init_test_db(cog)
+    new_channel = SimpleNamespace(id=303, delete=AsyncMock(), send=AsyncMock())
+    guild = SimpleNamespace(create_voice_channel=AsyncMock(return_value=new_channel))
+    member = SimpleNamespace(
+        guild=guild,
+        display_name="Owner",
+        mention="@Owner",
+        move_to=AsyncMock(side_effect=RuntimeError("voice disconnected")),
+    )
+    generator = SimpleNamespace(category=None, overwrites={})
+
+    await cog._create_lobby(member, generator)
+
+    new_channel.delete.assert_awaited_once()
+    assert cog.active_channels == set()
+    assert cog.control_views == {}
+    async with connect(bot.db_path) as db:
+        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
+            assert await cursor.fetchall() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_lobby_removes_tracking_when_discord_delete_fails(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    await _init_test_db(cog)
+    channel = SimpleNamespace(id=303, delete=AsyncMock(side_effect=RuntimeError("forbidden")))
+    cog.active_channels.add(channel.id)
+    view = VoiceControlView(DummyVoiceChannel(), object())
+    cog.control_views[channel.id] = view
+    async with connect(bot.db_path) as db:
+        await db.execute("INSERT INTO lobby_active (channel_id) VALUES (?)", (channel.id,))
+        await db.commit()
+
+    await cog._delete_lobby(channel)
+
+    assert view.is_finished()
+    assert cog.active_channels == set()
+    assert cog.control_views == {}
+    async with connect(bot.db_path) as db:
+        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
+            assert await cursor.fetchall() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    reason="A duplicate lock interaction overwrites the original permission snapshot.",
+)
+async def test_repeated_lock_preserves_permissions_for_eventually_unlocked_channel():
+    owner = object()
+    default_role = object()
+    allowed_role = object()
+    channel = DummyVoiceChannel(
+        {
+            default_role: PermissionOverwrite(),
+            allowed_role: PermissionOverwrite(connect=True),
+            owner: PermissionOverwrite(connect=True),
+        }
+    )
+    view = VoiceControlView(channel, owner)
+    interaction = _make_interaction(
+        user=owner, guild=SimpleNamespace(default_role=default_role)
+    )
+
+    await view.children[0].callback(interaction)
+    await view.children[0].callback(interaction)
+    await view.children[1].callback(interaction)
+
+    assert channel.overwrites[default_role].connect is None
+    assert channel.overwrites[allowed_role].connect is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    reason="A failed control-message send leaves an orphaned lobby_active database row.",
+)
+async def test_create_lobby_rolls_back_database_when_control_message_fails(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    await _init_test_db(cog)
+    new_channel = SimpleNamespace(
+        id=303,
+        delete=AsyncMock(),
+        send=AsyncMock(side_effect=RuntimeError("missing send permission")),
+    )
+    guild = SimpleNamespace(create_voice_channel=AsyncMock(return_value=new_channel))
+    member = SimpleNamespace(
+        guild=guild,
+        display_name="Owner",
+        mention="@Owner",
+        move_to=AsyncMock(),
+    )
+    generator = SimpleNamespace(category=None, overwrites={})
+
+    await cog._create_lobby(member, generator)
+
+    new_channel.delete.assert_awaited_once()
+    assert cog.active_channels == set()
+    assert cog.control_views == {}
+    async with connect(bot.db_path) as db:
+        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
+            assert await cursor.fetchall() == []

@@ -36,3 +36,14 @@ async def test_get_mem_usage_sums_bot_and_live_children(monkeypatch):
     assert await InfoCog._get_mem_usage() == (
         "Total RSS: 15.00 MiB\n" "Bot: 10.00 MiB\n" "Children (1): 5.00 MiB"
     )
+
+
+@pytest.mark.asyncio
+async def test_uptime_formats_hours_and_remaining_minutes(monkeypatch):
+    monkeypatch.setattr(
+        "extensions.general.info.Process",
+        lambda _pid: SimpleNamespace(create_time=lambda: 0),
+    )
+    monkeypatch.setattr("extensions.general.info.time.time", lambda: 3_661)
+
+    assert await InfoCog(SimpleNamespace()).uptime() == "1 hours, 1 minutes"
