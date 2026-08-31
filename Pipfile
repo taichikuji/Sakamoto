@@ -22,7 +22,7 @@ yt-dlp-ejs = "*"
 aiohttp = "*"
 psutil = "*"
 aiosqlite = "*"
-pynacl = ">=1.6.2"
+pynacl = "*"
 
 [requires]
 python_version = "3.14"
