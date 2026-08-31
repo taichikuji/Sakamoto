@@ -149,6 +149,10 @@ def _make_interaction(*, user, guild_id=1):
     )
 
 
+async def _wait_for_event(event: asyncio.Event) -> None:
+    await asyncio.wait_for(event.wait(), timeout=1)
+
+
 def _add_session(
     engine,
     voice_client,
@@ -729,11 +733,11 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
 
     async def connect(**_kwargs):
         connection_started.set()
-        await lookup_started.wait()
+        await _wait_for_event(lookup_started)
         return connected_client
 
     async def lookup(_executor, _fn, _arg):
-        await connection_started.wait()
+        await _wait_for_event(connection_started)
         lookup_started.set()
         return {
             "url": "https://stream.test/live",
@@ -909,7 +913,7 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
 
             async def lookup():
                 started.set()
-                await release.wait()
+                await _wait_for_event(release)
                 return info
 
             return asyncio.create_task(lookup())
@@ -918,7 +922,7 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
     monkeypatch.setattr("extensions.audio.music.get_running_loop", lambda: loop)
 
     first = asyncio.create_task(cog.resolve_source("Track"))
-    await started.wait()
+    await _wait_for_event(started)
     second = asyncio.create_task(cog.resolve_source(" track "))
     await asyncio.sleep(0)
     release.set()
@@ -1256,3 +1260,33 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
     await scheduled[0]
 
     assert cog.sessions == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    reason="Concurrent joins observe no session and connect the bot twice.",
+)
+async def test_concurrent_voice_connection_requests_share_one_connection():
+    engine = AudioEngine(_make_bot())
+    connection_started = asyncio.Event()
+    release_connection = asyncio.Event()
+    clients = [DummyVoiceClient(), DummyVoiceClient()]
+
+    async def connect(**_kwargs):
+        connection_started.set()
+        await _wait_for_event(release_connection)
+        return clients.pop(0)
+
+    channel = SimpleNamespace(connect=AsyncMock(side_effect=connect))
+    interaction = _make_interaction(user=DummyMember(1, voice_channel=channel))
+    first = asyncio.create_task(engine.get_or_connect_voice_client(1, channel, interaction))
+    await _wait_for_event(connection_started)
+    second = asyncio.create_task(engine.get_or_connect_voice_client(1, channel, interaction))
+    await asyncio.sleep(0)
+
+    try:
+        channel.connect.assert_awaited_once_with(self_deaf=True)
+    finally:
+        release_connection.set()
+        await asyncio.gather(first, second)

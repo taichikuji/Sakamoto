@@ -4,10 +4,17 @@ import sys
 from unittest.mock import AsyncMock
 
 import pytest
+from aiohttp import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from extensions.integrations.steam import SteamCog
+
+
+async def _init_test_db(cog):
+    if sys.version_info >= (3, 14):
+        pytest.skip("aiosqlite.connect() blocks under Python 3.14 in this environment")
+    await cog._init_db()
 
 
 class DummyResponse:
@@ -68,7 +75,7 @@ def _make_interaction(user_id: int = 1):
 async def test_save_and_get_steam_link_roundtrip(tmp_path):
     bot = DummyBot(db_path=tmp_path / "steam.db", session=None)
     cog = SteamCog(bot)
-    await cog._init_db()
+    await _init_test_db(cog)
 
     await cog._save_steam_link(10, "76561198000000010")
     linked = await cog._get_steam_link(10)
@@ -185,6 +192,19 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
     assert await error_cog._resolve_steam_id("alice") == (
         None,
         ":x: Unexpected error while resolving your Steam account. Please try again later.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_steam_id_reports_network_errors_without_leaking_details(monkeypatch, tmp_path):
+    monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
+    cog = SteamCog(
+        DummyBot(db_path=tmp_path / "steam.db", session=DummySession([ClientError("dns")]))
+    )
+
+    assert await cog._resolve_steam_id("alice") == (
+        None,
+        ":x: Network error while contacting Steam. Please try again in a moment.",
     )
 
 

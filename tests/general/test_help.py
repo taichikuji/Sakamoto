@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -70,3 +71,15 @@ async def test_command_name_autocomplete_filters_tree_and_limits_choices():
         SimpleNamespace(), ""
     )
     assert len(all_choices) == 25
+
+
+@pytest.mark.asyncio
+async def test_show_help_reports_unknown_command_without_exposing_other_commands():
+    interaction = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
+    bot = SimpleNamespace(tree=SimpleNamespace(get_command=lambda _name: None))
+
+    await HelpCog.show_help.callback(HelpCog(bot), interaction, "/missing command")
+
+    interaction.response.send_message.assert_awaited_once_with(
+        ":x: Command `/missing command` not found.", ephemeral=True
+    )
