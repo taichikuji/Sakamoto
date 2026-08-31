@@ -186,3 +186,5 @@ data/*.sqlite
 functions_preview/
 # vscode config
 .vscode
+# agents skills file
+.agents
