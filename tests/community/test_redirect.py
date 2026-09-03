@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 from unittest.mock import AsyncMock
 
 import pytest
@@ -40,6 +40,18 @@ from extensions.community.redirect import ReplaceCog
         (
             "thread https://reddit.com/r/python/comments/xyz",
             "thread https://vxreddit.com/r/python/comments/xyz",
+        ),
+        (
+            "reel https://www.facebook.com/reel/12345",
+            "reel https://facebed.seria.moe/reel/12345",
+        ),
+        (
+            "video https://www.bilibili.com/video/BV123",
+            "video https://vxbilibili.com/video/BV123",
+        ),
+        (
+            "song https://open.spotify.com/track/123abc?si=xyz",
+            "song https://fxspotify.com/track/123abc?si=xyz",
         ),
     ],
 )

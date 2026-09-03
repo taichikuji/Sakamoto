@@ -23,6 +23,9 @@ class ReplaceCog(commands.Cog):
             "pixiv.net": "phixiv.net",
             "youtube.com/shorts": "youtu.be",
             "reddit.com": "vxreddit.com",
+            "facebook.com": "facebed.seria.moe",
+            "bilibili.com": "vxbilibili.com",
+            "open.spotify.com": "fxspotify.com",
         }
 
     def replace_text(self, text: str) -> str:

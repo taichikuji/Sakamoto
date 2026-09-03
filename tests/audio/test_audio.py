@@ -1,9 +1,9 @@
-from collections import deque
 import asyncio
-from pathlib import Path
-from types import SimpleNamespace
 import sys
+from collections import deque
+from pathlib import Path
 from time import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
