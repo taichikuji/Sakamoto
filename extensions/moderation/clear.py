@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class ClearCog(commands.Cog):
     """Cog for bulk message removal in text channels."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
 
     @app_commands.command(
@@ -64,6 +64,6 @@ class ClearCog(commands.Cog):
             logger.error("An unexpected error occurred: %s", error)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the ClearCog to the bot."""
     await bot.add_cog(ClearCog(bot))

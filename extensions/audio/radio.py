@@ -28,7 +28,7 @@ class RadioCog(
 
     RADIO_ENDPOINT = "https://radio.garden/api"
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.engine = get_audio_engine(bot)
 
@@ -126,7 +126,7 @@ class RadioCog(
         except ValueError as error:
             await interaction.followup.send(f":x: {error}", ephemeral=True)
             return
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("radio resolution failed: %s", error)
             await interaction.followup.send(
                 ":x: Failed to reach radio source. Try again later.", ephemeral=True
@@ -266,7 +266,7 @@ class RadioCog(
                 if response.status == 200:
                     return stream_api_url
 
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("HTTP request failed for %s: %s", stream_api_url, error)
             raise ValueError("Could not resolve a playable radio stream.") from error
 
@@ -308,7 +308,7 @@ class RadioCog(
                 if response.status != 200:
                     return None
                 return await response.json(content_type=None)
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("HTTP request failed for %s: %s", url, error)
             return None
 
@@ -322,6 +322,6 @@ class RadioCog(
         return None
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the RadioCog to the bot."""
     await bot.add_cog(RadioCog(bot))

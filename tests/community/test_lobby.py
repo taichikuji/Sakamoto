@@ -117,7 +117,9 @@ async def test_voice_control_lock_and_unlock_toggle_permissions_and_buttons():
     assert channel.overwrites[default_role].connect is False
     assert channel.overwrites[allowed_role].connect is False
     assert channel.overwrites[owner].connect is True
-    interaction.followup.send.assert_awaited_with(":lock: Channel locked.", ephemeral=True)
+    interaction.followup.send.assert_awaited_with(
+        ":lock: Channel locked.", ephemeral=True
+    )
 
     await unlock_button.callback(interaction)
 
@@ -126,7 +128,9 @@ async def test_voice_control_lock_and_unlock_toggle_permissions_and_buttons():
     assert channel.overwrites[default_role].connect is None
     assert channel.overwrites[allowed_role].connect is True
     assert channel.overwrites[owner].connect is True
-    interaction.followup.send.assert_awaited_with(":unlock: Channel unlocked.", ephemeral=True)
+    interaction.followup.send.assert_awaited_with(
+        ":unlock: Channel unlocked.", ephemeral=True
+    )
 
 
 @pytest.mark.asyncio
@@ -190,7 +194,9 @@ async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
 
     assert cog.active_channels == {22}
     async with connect(bot.db_path) as db:
-        async with db.execute("SELECT channel_id FROM lobby_active ORDER BY channel_id") as cursor:
+        async with db.execute(
+            "SELECT channel_id FROM lobby_active ORDER BY channel_id"
+        ) as cursor:
             rows = await cursor.fetchall()
     assert rows == [(22,)]
 
@@ -221,7 +227,9 @@ async def test_create_lobby_inherits_overwrites_and_elevates_owner(tmp_path):
         category=object(),
         overwrites={
             default_role: PermissionOverwrite(view_channel=False, connect=False),
-            allowed_role: PermissionOverwrite(view_channel=True, connect=True, speak=False),
+            allowed_role: PermissionOverwrite(
+                view_channel=True, connect=True, speak=False
+            ),
             member: PermissionOverwrite(speak=False),
         },
     )
@@ -259,7 +267,8 @@ async def test_set_generator_set_clear_and_missing_clear_branches(tmp_path):
     assert cog.generators[77] == 888
     interaction.response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.followup.send.assert_awaited_with(
-        ":white_check_mark: **Generator VC** is now the lobby generator.", ephemeral=True
+        ":white_check_mark: **Generator VC** is now the lobby generator.",
+        ephemeral=True,
     )
 
     await LobbyCog.set_generator.callback(cog, interaction, None)
@@ -421,12 +430,16 @@ async def test_delete_lobby_removes_tracking_when_discord_delete_fails(tmp_path)
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
     await _init_test_db(cog)
-    channel = SimpleNamespace(id=303, delete=AsyncMock(side_effect=RuntimeError("forbidden")))
+    channel = SimpleNamespace(
+        id=303, delete=AsyncMock(side_effect=RuntimeError("forbidden"))
+    )
     cog.active_channels.add(channel.id)
     view = VoiceControlView(DummyVoiceChannel(), object())
     cog.control_views[channel.id] = view
     async with connect(bot.db_path) as db:
-        await db.execute("INSERT INTO lobby_active (channel_id) VALUES (?)", (channel.id,))
+        await db.execute(
+            "INSERT INTO lobby_active (channel_id) VALUES (?)", (channel.id,)
+        )
         await db.commit()
 
     await cog._delete_lobby(channel)

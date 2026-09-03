@@ -43,7 +43,9 @@ async def test_sync_scope_returns_no_commands_message_for_empty_result():
 async def test_sync_scope_formats_http_exception(monkeypatch):
     monkeypatch.setattr("extensions.core.sync.HTTPException", DummyHTTPException)
     bot = SimpleNamespace(
-        tree=SimpleNamespace(sync=AsyncMock(side_effect=DummyHTTPException(429, "rate limited")))
+        tree=SimpleNamespace(
+            sync=AsyncMock(side_effect=DummyHTTPException(429, "rate limited"))
+        )
     )
     cog = SyncCog(bot)
 
@@ -54,7 +56,9 @@ async def test_sync_scope_formats_http_exception(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_scope_formats_unexpected_exception():
-    bot = SimpleNamespace(tree=SimpleNamespace(sync=AsyncMock(side_effect=RuntimeError("boom"))))
+    bot = SimpleNamespace(
+        tree=SimpleNamespace(sync=AsyncMock(side_effect=RuntimeError("boom")))
+    )
     cog = SyncCog(bot)
 
     message = await cog._sync_scope()

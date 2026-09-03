@@ -40,14 +40,16 @@ class Sakamoto(commands.AutoShardedBot):
             try:
                 await self.load_extension(module)
                 logger.info("Loaded %s", module)
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except Exception as e:
                 # Catches ExtensionFailed (like in steam.py), ImportErrors, etc.
                 logger.error("Failed to load %s: %s", module, e)
 
     async def on_ready(self):
         """Set the bot presence after connecting to Discord."""
         assert self.user is not None, "self.user is None in on_ready!"
-        display = Activity(name="Use /help to view all commands!", type=ActivityType.listening)
+        display = Activity(
+            name="Use /help to view all commands!", type=ActivityType.listening
+        )
         await self.change_presence(activity=display)
         logger.info("I am online! - %s %s", self.user.name, self.user.id)
 

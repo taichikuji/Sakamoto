@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 class LoaderCog(commands.Cog):
     """Cog for loading, unloading, and reloading extensions."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
 
     @app_commands.command(name="load", description="Load an extension.")
-    @app_commands.describe(extension="Extension path relative to `extensions.`, such as `audio.music`.")
+    @app_commands.describe(
+        extension="Extension path relative to `extensions.`, such as `audio.music`."
+    )
     @app_commands.checks.has_permissions(administrator=True)
     async def load(self, interaction: Interaction, extension: str) -> None:
         """Load a bot extension."""
@@ -29,16 +31,20 @@ class LoaderCog(commands.Cog):
                 extension,
                 strftime("%A, %d %b %Y, %I:%M:%S %p", localtime()),
             )
-            description = f":white_check_mark: Loaded extension '{extension}' successfully."
+            description = (
+                f":white_check_mark: Loaded extension '{extension}' successfully."
+            )
         except commands.ExtensionAlreadyLoaded:
-            description = f":information_source: Extension '{extension}' is already loaded."
+            description = (
+                f":information_source: Extension '{extension}' is already loaded."
+            )
         except commands.ExtensionNotFound:
             description = f":x: Extension '{extension}' not found."
         except commands.ExtensionFailed:
             description = f":x: Extension '{extension}' failed to load due to an error."
         except commands.NoEntryPointError:
             description = f":x: Extension '{extension}' does not have a setup function."
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             description = f":x: An unexpected error occurred: {e}"
             logger.error(description)
         await interaction.response.send_message(description, ephemeral=True)
@@ -50,10 +56,12 @@ class LoaderCog(commands.Cog):
         """Unload a bot extension."""
         try:
             await self.bot.unload_extension(f"extensions.{extension}")
-            description = f":white_check_mark: Unloaded extension '{extension}' successfully."
+            description = (
+                f":white_check_mark: Unloaded extension '{extension}' successfully."
+            )
         except commands.ExtensionNotLoaded:
             description = f":information_source: Extension '{extension}' is not loaded."
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             description = f":x: An unexpected error occurred: {e}"
             logger.error(description)
         await interaction.response.send_message(description, ephemeral=True)
@@ -70,16 +78,20 @@ class LoaderCog(commands.Cog):
                 extension,
                 strftime("%A, %d %b %Y, %I:%M:%S %p", localtime()),
             )
-            description = f":white_check_mark: Reloaded extension '{extension}' successfully."
+            description = (
+                f":white_check_mark: Reloaded extension '{extension}' successfully."
+            )
         except commands.ExtensionNotLoaded:
             description = f":x: Extension '{extension}' is not loaded."
         except commands.ExtensionNotFound:
             description = f":x: Extension '{extension}' not found."
         except commands.ExtensionFailed:
-            description = f":x: Extension '{extension}' failed to reload due to an error."
+            description = (
+                f":x: Extension '{extension}' failed to reload due to an error."
+            )
         except commands.NoEntryPointError:
             description = f":x: Extension '{extension}' does not have a setup function."
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             description = f":x: An unexpected error occurred: {e}"
             logger.error(description)
         await interaction.response.send_message(description, ephemeral=True)
@@ -93,12 +105,13 @@ class LoaderCog(commands.Cog):
         """Handle errors for the loader commands."""
         if isinstance(error, app_commands.errors.MissingPermissions):
             await interaction.response.send_message(
-                ":x: You need Administrator permissions to run this command.", ephemeral=True
+                ":x: You need Administrator permissions to run this command.",
+                ephemeral=True,
             )
         else:
             logger.error("Unexpected error in command: %s", error)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the LoaderCog to the bot."""
     await bot.add_cog(LoaderCog(bot))

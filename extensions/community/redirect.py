@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 class ReplaceCog(commands.Cog):
     """Cog for replacing social media links with alternative frontends."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.replacements = {
             "x.com": "fixupx.com",
@@ -46,6 +46,6 @@ class ReplaceCog(commands.Cog):
             await message.channel.send(fixed)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the ReplaceCog to the bot."""
     await bot.add_cog(ReplaceCog(bot))

@@ -52,7 +52,9 @@ class VoiceControlView(View):
 
         self.connect_overwrites.clear()
         for target, overwrite in overwrites.items():
-            if target == self.owner or (target != default_role and overwrite.connect is not True):
+            if target == self.owner or (
+                target != default_role and overwrite.connect is not True
+            ):
                 continue
             if isinstance(target, Object):
                 if target.type is Role:
@@ -113,11 +115,13 @@ class RenameModal(Modal, title="Rename Channel"):
 
 
 class LobbyCog(
-    commands.GroupCog, group_name="lobby", group_description="Dynamic voice lobby tools."
+    commands.GroupCog,
+    group_name="lobby",
+    group_description="Dynamic voice lobby tools.",
 ):
     """Cog for dynamic voice channel creation and cleanup."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.active_channels: set[int] = set()
         self.generators: dict[int, int] = {}  # guild_id -> channel_id
@@ -151,7 +155,9 @@ class LobbyCog(
 
     async def _load_generators(self):
         async with connect(self.bot.db_path) as db:
-            async with db.execute("SELECT guild_id, channel_id FROM lobby_generator") as cursor:
+            async with db.execute(
+                "SELECT guild_id, channel_id FROM lobby_generator"
+            ) as cursor:
                 self.generators = {row[0]: row[1] async for row in cursor}
 
     async def _load_lobby_active(self):
@@ -191,7 +197,9 @@ class LobbyCog(
 
     async def _remove_generator(self, guild_id: int):
         async with connect(self.bot.db_path) as db:
-            await db.execute("DELETE FROM lobby_generator WHERE guild_id = ?", (guild_id,))
+            await db.execute(
+                "DELETE FROM lobby_generator WHERE guild_id = ?", (guild_id,)
+            )
             await db.commit()
         self.generators.pop(guild_id, None)
 
@@ -224,7 +232,8 @@ class LobbyCog(
         else:
             await self._save_generator(guild_id, channel.id)
             await interaction.followup.send(
-                f":white_check_mark: **{channel.name}** is now the lobby generator.", ephemeral=True
+                f":white_check_mark: **{channel.name}** is now the lobby generator.",
+                ephemeral=True,
             )
 
     @set_generator.error
@@ -258,7 +267,9 @@ class LobbyCog(
         ):
             await self._create_lobby(member, after.channel)
 
-    async def _create_lobby(self, member: Member, generator: VoiceChannel | StageChannel) -> None:
+    async def _create_lobby(
+        self, member: Member, generator: VoiceChannel | StageChannel
+    ) -> None:
         guild = member.guild
         overwrites = generator.overwrites
         overwrites.setdefault(member, PermissionOverwrite()).update(
@@ -278,7 +289,8 @@ class LobbyCog(
 
             async with connect(self.bot.db_path) as db:
                 await db.execute(
-                    "INSERT INTO lobby_active (channel_id) VALUES (?)", (new_channel.id,)
+                    "INSERT INTO lobby_active (channel_id) VALUES (?)",
+                    (new_channel.id,),
                 )
                 await db.commit()
 
@@ -294,8 +306,10 @@ class LobbyCog(
             self.control_views[new_channel.id] = view
             await new_channel.send(embed=embed, view=view)
 
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to set up lobby for %s: %s", member.display_name, error)
+        except Exception as error:
+            logger.error(
+                "Failed to set up lobby for %s: %s", member.display_name, error
+            )
             if view := self.control_views.pop(new_channel.id, None):
                 view.stop()
             self.active_channels.discard(new_channel.id)
@@ -307,16 +321,18 @@ class LobbyCog(
 
         try:
             await channel.delete(reason="Dynamic channel empty")
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("Failed to delete lobby channel %s: %s", channel.id, error)
 
         self.active_channels.discard(channel.id)
 
         async with connect(self.bot.db_path) as db:
-            await db.execute("DELETE FROM lobby_active WHERE channel_id = ?", (channel.id,))
+            await db.execute(
+                "DELETE FROM lobby_active WHERE channel_id = ?", (channel.id,)
+            )
             await db.commit()
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the LobbyCog to the bot."""
     await bot.add_cog(LobbyCog(bot))

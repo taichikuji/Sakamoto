@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MusicCog(commands.Cog):
     """Cog for music playback and shared audio controls."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.engine = get_audio_engine(bot)
         self.source_cache: dict[str, tuple[float, dict]] = {}
@@ -50,7 +50,7 @@ class MusicCog(commands.Cog):
                     app_commands.Choice(name=s[:100], value=s[:100])
                     for s in (await r.json(content_type=None))[1][:5]
                 ]
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("Autocomplete failed for query '%s': %s", query, error)
             return []
 
@@ -128,7 +128,7 @@ class MusicCog(commands.Cog):
                 followup=interaction.followup.send,
             )
 
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             if not was_connected:
                 await self.engine.disconnect_and_cleanup(guild_id)
             await interaction.followup.send(
@@ -205,7 +205,7 @@ class MusicCog(commands.Cog):
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]
         try:
             expires_at = float(raw_expiry or "")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             expires_at = time() + 30 * 60
         return expires_at - 60
 
@@ -347,7 +347,7 @@ class MusicCog(commands.Cog):
             queue_items.append(f"**Now Playing:** {current.title} [{current.duration}]")
 
         for i, item in enumerate(queued[:max_display]):
-            queue_items.append(f"{i+1}. {item.title} [{item.duration}]")
+            queue_items.append(f"{i + 1}. {item.title} [{item.duration}]")
 
         if len(queued) > max_display:
             queue_items.append(f"\n...and {len(queued) - max_display} more.")
@@ -419,6 +419,6 @@ class MusicCog(commands.Cog):
             )
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the MusicCog to the bot."""
     await bot.add_cog(MusicCog(bot))

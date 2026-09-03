@@ -47,7 +47,7 @@ class PlaybackSession:
 class AudioEngine:
     """Shared voice, queue, and playback behavior."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.sessions: dict[int, PlaybackSession] = {}
 
@@ -181,7 +181,7 @@ class AudioEngine:
             try:
                 voice_client = await user_voice_channel.connect(self_deaf=True)
                 self.sessions[guild_id] = PlaybackSession(voice_client)
-            except Exception as error:  # pylint: disable=broad-exception-caught
+            except Exception as error:
                 await interaction.followup.send(
                     f":x: Failed to connect to the voice channel. Error: {error}",
                     ephemeral=True,
@@ -212,7 +212,7 @@ class AudioEngine:
                     await session.command_channel.send(
                         f":notes: Now playing: **{item.title}** [{item.duration}]"
                     )
-            except Exception as error:  # pylint: disable=broad-exception-caught
+            except Exception as error:
                 logger.warning(
                     "Failed to send now-playing message in guild %s: %s",
                     guild_id,
@@ -261,7 +261,7 @@ class AudioEngine:
         if not stream_url and item.refresh_stream is not None:
             try:
                 stream_url = await item.refresh_stream(item.source_url)
-            except Exception as error:  # pylint: disable=broad-exception-caught
+            except Exception as error:
                 logger.error("Could not refresh URL for %s: %s", item.title, error)
                 self.play_next(guild_id)
                 return False
@@ -295,7 +295,7 @@ class AudioEngine:
                 after=lambda error: self.play_next(guild_id, error),
             )
             return True
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             if source is not None:
                 source.cleanup()
             logger.error("Playback failed to start in guild %s: %s", guild_id, error)
@@ -308,7 +308,7 @@ class AudioEngine:
                 session.voice_client.stop()
                 if session.voice_client.is_connected():
                     await session.voice_client.disconnect()
-            except Exception as error:  # pylint: disable=broad-exception-caught
+            except Exception as error:
                 logger.error(
                     "Error during disconnect for guild %s: %s", guild_id, error
                 )
@@ -368,7 +368,7 @@ class AudioEngine:
                 await self.disconnect_and_cleanup(guild_id)
 
 
-def get_audio_engine(bot: "Sakamoto") -> AudioEngine:
+def get_audio_engine(bot: Sakamoto) -> AudioEngine:
     if (engine := getattr(bot, "_audio_engine", None)) is None:
         engine = AudioEngine(bot)
         setattr(bot, "_audio_engine", engine)
