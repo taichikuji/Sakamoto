@@ -7,6 +7,7 @@ from aiohttp import ClientError, ContentTypeError
 from aiosqlite import connect
 from discord import Embed, Interaction, app_commands
 from discord.ext import commands
+from discord.utils import escape_markdown
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -320,17 +321,34 @@ class SteamCog(
                 f"steam://joinlobby/{app_id}/{lobby_id}/{linked_steam_id}"
             )
 
-            embed = Embed(
-                title=f"Steam Lobby Invite for {interaction.user.display_name}",
-                description=f"Join {interaction.user.mention}'s lobby for **{game_name}**!",
-                color=self.bot.color,
+            player_name = escape_markdown(
+                player_info.get("personaname", interaction.user.display_name),
+                as_needed=True,
             )
-            embed.add_field(name="Lobby Link", value=f"<{lobby_url}>", inline=False)
+            if profile_url := player_info.get("profileurl"):
+                player_name = f"[{player_name}]({profile_url})"
+
+            embed = Embed(title="Steam Lobby Invite", color=self.bot.color)
+            embed.add_field(
+                name="Player",
+                value=player_name,
+            )
+            embed.add_field(
+                name="Game",
+                value=f"{escape_markdown(game_name, as_needed=True)}\nAppID: `{app_id}`",
+            )
+            embed.add_field(
+                name="Lobby Link",
+                value=f"[Join Lobby]({lobby_url})",
+                inline=False,
+            )
             embed.set_footer(
                 text="Clicking this link requires Steam to be installed and running."
             )
 
-            if interaction.user.display_avatar:
+            if avatar_url := player_info.get("avatarfull"):
+                embed.set_thumbnail(url=avatar_url)
+            elif interaction.user.display_avatar:
                 embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
             await interaction.followup.send(embed=embed)
