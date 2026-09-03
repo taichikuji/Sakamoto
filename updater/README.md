@@ -1,6 +1,6 @@
 # Sakamoto updater
 
-The optional Docker Compose updater replaces the archived Watchtower workflow. It requires Docker and the legacy `docker-compose` command; it does not support Podman.
+The optional Docker Compose updater replaces the archived Watchtower workflow. It requires Docker and the legacy `docker-compose` command.
 
 Enable the `updater` service and the `com.taichikuji.sakamoto.enable=true` label in the root `docker-compose.yml`, then deploy with `./init-docker.sh`.
 
