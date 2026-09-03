@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
