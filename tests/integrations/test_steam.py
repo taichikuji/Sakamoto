@@ -364,6 +364,9 @@ async def test_get_lobby_success_sends_embed_with_redirect_url(monkeypatch, tmp_
                                 "gameid": "570",
                                 "gameextrainfo": "Dota 2",
                                 "lobbysteamid": "1234567890",
+                                "personaname": "Steam *User*",
+                                "profileurl": "https://steamcommunity.test/id/user/",
+                                "avatarfull": "https://example.test/steam-avatar.png",
                             }
                         ]
                     }
@@ -378,5 +381,11 @@ async def test_get_lobby_success_sends_embed_with_redirect_url(monkeypatch, tmp_
 
     interaction.followup.send.assert_awaited_once()
     embed = interaction.followup.send.await_args.kwargs["embed"]
-    assert "Steam Lobby Invite for user-44" == embed.title
-    assert "steam://joinlobby/570/1234567890/76561198000000044" in embed.fields[0].value
+    assert embed.title == "Steam Lobby Invite"
+    assert embed.fields[0].name == "Player"
+    assert embed.fields[0].value == (
+        "[Steam \\*User*](https://steamcommunity.test/id/user/)"
+    )
+    assert embed.fields[1].value == "Dota 2\nAppID: `570`"
+    assert "steam://joinlobby/570/1234567890/76561198000000044" in embed.fields[2].value
+    assert embed.thumbnail.url == "https://example.test/steam-avatar.png"
