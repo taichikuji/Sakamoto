@@ -6,14 +6,8 @@ name = "pypi"
 [dev-packages]
 pytest = "*"
 pytest-asyncio = "*"
-pylint = "*"
-black = "*"
-autopep8 = "*"
-flake8 = "*"
-isort = "*"
 mypy = "*"
-pyupgrade = "*"
-autoflake = "*"
+ruff = "*"
 
 [packages]
 "discord.py" = {extras = ["voice"], version = "*"}

@@ -34,7 +34,7 @@ async def test_get_mem_usage_sums_bot_and_live_children(monkeypatch):
     monkeypatch.setattr("extensions.general.info.Process", lambda _pid: bot_process)
 
     assert await InfoCog._get_mem_usage() == (
-        "Total RSS: 15.00 MiB\n" "Bot: 10.00 MiB\n" "Children (1): 5.00 MiB"
+        "Total RSS: 15.00 MiB\nBot: 10.00 MiB\nChildren (1): 5.00 MiB"
     )
 
 

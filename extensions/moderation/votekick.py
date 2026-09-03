@@ -1,6 +1,6 @@
 import logging
 from asyncio import sleep
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from discord import (
     ButtonStyle,
@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 class VotekickView(View):
     """Interactive vote controls for a Voice Votekick."""
 
-    def __init__(self, bot: "Sakamoto", required_votes: int, author: Member, target: Member):
+    def __init__(
+        self, bot: Sakamoto, required_votes: int, author: Member, target: Member
+    ):
         super().__init__(timeout=60.0)
         self.bot = bot
         self.required_votes = required_votes
@@ -31,7 +33,7 @@ class VotekickView(View):
         self.target = target
         self.yes_votes: set[int] = set()
         self.no_votes: set[int] = set()
-        self.message: Optional[Message] = None
+        self.message: Message | None = None
 
     def has_voted(self, user_id: int) -> bool:
         """Return whether a member has already voted."""
@@ -50,7 +52,9 @@ class VotekickView(View):
 
             embed = self.message.embeds[0]
             embed.title = "Votekick Timed Out"
-            embed.description = f":hourglass: The votekick against {self.target.mention} timed out."
+            embed.description = (
+                f":hourglass: The votekick against {self.target.mention} timed out."
+            )
             embed.color = 0xFF0000  # Red
 
             await self.message.edit(embed=embed, view=self)
@@ -74,7 +78,9 @@ class VotekickView(View):
     async def yes_button(self, interaction: Interaction, _button: Button):
         """Record an affirmative vote and complete a successful Votekick."""
         if self.has_voted(interaction.user.id):
-            await interaction.response.send_message(":x: You have already voted.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: You have already voted.", ephemeral=True
+            )
             return
 
         self.yes_votes.add(interaction.user.id)
@@ -99,7 +105,7 @@ class VotekickView(View):
                 original_channel = self.target.voice.channel
                 try:
                     await self.target.move_to(None, reason="Votekick successful.")
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception:
                     logger.error("Failed to move %s during votekick.", self.target)
 
                 overwrite = PermissionOverwrite(connect=False)
@@ -114,7 +120,9 @@ class VotekickView(View):
     async def no_button(self, interaction: Interaction, _button: Button):
         """Record a negative vote."""
         if self.has_voted(interaction.user.id):
-            await interaction.response.send_message(":x: You have already voted.", ephemeral=True)
+            await interaction.response.send_message(
+                ":x: You have already voted.", ephemeral=True
+            )
             return
 
         self.no_votes.add(interaction.user.id)
@@ -124,7 +132,7 @@ class VotekickView(View):
 class ModerationCog(commands.Cog):
     """Cog for moderation commands."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.votekicks: dict[int, Message] = {}
 
@@ -133,17 +141,22 @@ class ModerationCog(commands.Cog):
         await sleep(delay)
         try:
             await channel.set_permissions(member, overwrite=None)
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error(
-                "Failed to remove votekick ban for %s in channel %s: %s", member, channel.id, error
+                "Failed to remove votekick ban for %s in channel %s: %s",
+                member,
+                channel.id,
+                error,
             )
 
     @app_commands.command(
-        name="votekick", description="Start a vote to kick a user from the current voice channel."
+        name="votekick",
+        description="Start a vote to kick a user from the current voice channel.",
     )
-    @app_commands.describe(member="Member to vote to remove from the current voice channel.")
+    @app_commands.describe(
+        member="Member to vote to remove from the current voice channel."
+    )
     # Guard clauses keep each rejected Voice Votekick case self-contained.
-    # pylint: disable=too-many-return-statements
     async def votekick(self, interaction: Interaction, member: Member):
         """Start a Voice Votekick for a member in the caller's channel."""
         if not interaction.guild:
@@ -154,13 +167,17 @@ class ModerationCog(commands.Cog):
 
         if not isinstance(author := interaction.user, Member):
             await interaction.response.send_message(
-                ":x: You must be a member of this server to use this command.", ephemeral=True
+                ":x: You must be a member of this server to use this command.",
+                ephemeral=True,
             )
             return
 
-        if not (author_voice := author.voice) or not (voice_channel := author_voice.channel):
+        if not (author_voice := author.voice) or not (
+            voice_channel := author_voice.channel
+        ):
             await interaction.response.send_message(
-                ":x: You must be in a voice channel to start a votekick.", ephemeral=True
+                ":x: You must be in a voice channel to start a votekick.",
+                ephemeral=True,
             )
             return
 
@@ -184,7 +201,8 @@ class ModerationCog(commands.Cog):
 
         if member.id in self.votekicks:
             await interaction.response.send_message(
-                f":x: A votekick for {member.mention} is already in progress.", ephemeral=True
+                f":x: A votekick for {member.mention} is already in progress.",
+                ephemeral=True,
             )
             return
 
@@ -204,7 +222,9 @@ class ModerationCog(commands.Cog):
             color=self.bot.color,
         )
         embed.add_field(name="Required Votes", value=str(required_votes), inline=True)
-        embed.add_field(name="Votes", value=":heavy_check_mark: Yes: 0\n:x: No: 0", inline=True)
+        embed.add_field(
+            name="Votes", value=":heavy_check_mark: Yes: 0\n:x: No: 0", inline=True
+        )
         embed.set_footer(text="The vote will end in 60 seconds.")
 
         view = VotekickView(self.bot, required_votes, author, member)
@@ -218,6 +238,6 @@ class ModerationCog(commands.Cog):
         self.votekicks.pop(member.id, None)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the ModerationCog to the bot."""
     await bot.add_cog(ModerationCog(bot))

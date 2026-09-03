@@ -18,6 +18,13 @@ Create the token in the [Discord Developer Portal](https://discord.com/developer
 - Follow existing style, use clear names and appropriate type hints, and document non-obvious logic.
 - Update relevant documentation and tests. Before opening a PR, run the relevant tests and verify no new warnings or errors.
 
+Run the code-quality checks with:
+
+```bash
+pipenv run ruff check .
+pipenv run ruff format --check .
+```
+
 ## Pull requests
 
 1. Fork the repository and branch from `main`.

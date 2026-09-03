@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class InfoCog(commands.Cog):
     """Cog that reports runtime information."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
 
     @app_commands.command(
@@ -80,6 +80,6 @@ class InfoCog(commands.Cog):
         return f"{uptime_hours} hours, {uptime_minutes} minutes"
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the InfoCog to the bot."""
     await bot.add_cog(InfoCog(bot))

@@ -45,7 +45,9 @@ def _make_interaction(*, user, guild):
 
 @pytest.mark.asyncio
 async def test_votekick_view_duplicate_votes_are_rejected():
-    bot = SimpleNamespace(loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None)
+    bot = SimpleNamespace(
+        loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None
+    )
     author = DummyMember(1)
     target = DummyMember(2)
     view = VotekickView(bot, required_votes=2, author=author, target=target)
@@ -64,8 +66,12 @@ async def test_votekick_view_duplicate_votes_are_rejected():
 
 @pytest.mark.asyncio
 async def test_votekick_view_timeout_updates_embed_and_disables_buttons():
-    bot = SimpleNamespace(loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None)
-    view = VotekickView(bot, required_votes=2, author=DummyMember(1), target=DummyMember(2))
+    bot = SimpleNamespace(
+        loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None
+    )
+    view = VotekickView(
+        bot, required_votes=2, author=DummyMember(1), target=DummyMember(2)
+    )
     embed = DummyEmbed()
     message = SimpleNamespace(embeds=[embed], edit=AsyncMock())
     view.message = message
@@ -80,7 +86,9 @@ async def test_votekick_view_timeout_updates_embed_and_disables_buttons():
 @pytest.mark.asyncio
 async def test_yes_button_successful_vote_kicks_target_and_schedules_unban(monkeypatch):
     bot = SimpleNamespace()
-    bot.loop = SimpleNamespace(create_task=MagicMock(side_effect=lambda coro: coro.close()))
+    bot.loop = SimpleNamespace(
+        create_task=MagicMock(side_effect=lambda coro: coro.close())
+    )
     bot.get_cog = lambda _name: None
     moderation_cog = ModerationCog(bot)
     moderation_cog.unban_after_delay = AsyncMock()
@@ -132,21 +140,31 @@ async def test_votekick_command_guardrails(monkeypatch):
     # Target not in same voice channel
     author_channel = SimpleNamespace(id=1, members=[])
     target_channel = SimpleNamespace(id=2, members=[])
-    interaction = _make_interaction(user=DummyMember(1, channel=author_channel), guild=object())
-    await ModerationCog.votekick.callback(cog, interaction, DummyMember(2, channel=target_channel))
+    interaction = _make_interaction(
+        user=DummyMember(1, channel=author_channel), guild=object()
+    )
+    await ModerationCog.votekick.callback(
+        cog, interaction, DummyMember(2, channel=target_channel)
+    )
     interaction.response.send_message.assert_awaited_with(
         ":x: <@2> is not in your voice channel.", ephemeral=True
     )
 
     # Self-votekick
-    interaction = _make_interaction(user=DummyMember(3, channel=author_channel), guild=object())
-    await ModerationCog.votekick.callback(cog, interaction, DummyMember(3, channel=author_channel))
+    interaction = _make_interaction(
+        user=DummyMember(3, channel=author_channel), guild=object()
+    )
+    await ModerationCog.votekick.callback(
+        cog, interaction, DummyMember(3, channel=author_channel)
+    )
     interaction.response.send_message.assert_awaited_with(
         ":x: You cannot votekick yourself.", ephemeral=True
     )
 
     # Bot target
-    interaction = _make_interaction(user=DummyMember(10, channel=author_channel), guild=object())
+    interaction = _make_interaction(
+        user=DummyMember(10, channel=author_channel), guild=object()
+    )
     await ModerationCog.votekick.callback(
         cog, interaction, DummyMember(50, bot=True, channel=author_channel)
     )

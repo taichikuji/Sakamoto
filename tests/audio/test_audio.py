@@ -686,8 +686,8 @@ async def test_play_connects_before_enqueue(monkeypatch):
     events = []
     connected_client = DummyVoiceClient(connected=True)
     voice_channel = DummyVoiceChannel(connected_client=connected_client)
-    voice_channel.connect.side_effect = (
-        lambda **_kwargs: events.append("connect") or connected_client
+    voice_channel.connect.side_effect = lambda **_kwargs: (
+        events.append("connect") or connected_client
     )
     interaction = _make_interaction(
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
@@ -1280,9 +1280,13 @@ async def test_concurrent_voice_connection_requests_share_one_connection():
 
     channel = SimpleNamespace(connect=AsyncMock(side_effect=connect))
     interaction = _make_interaction(user=DummyMember(1, voice_channel=channel))
-    first = asyncio.create_task(engine.get_or_connect_voice_client(1, channel, interaction))
+    first = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, interaction)
+    )
     await _wait_for_event(connection_started)
-    second = asyncio.create_task(engine.get_or_connect_voice_client(1, channel, interaction))
+    second = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, interaction)
+    )
     await asyncio.sleep(0)
 
     try:

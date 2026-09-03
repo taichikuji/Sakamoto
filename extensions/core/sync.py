@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class SyncCog(commands.Cog):
     """Cog for syncing application commands."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
 
     async def _sync_scope(self, guild: Guild | None = None) -> str:
@@ -25,10 +25,10 @@ class SyncCog(commands.Cog):
             return f"No commands synced {scope_name}."
         except HTTPException as e:
             return f"Failed sync {scope_name}: {e.status} {getattr(e, 'text', '')}"
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             return f"Error sync {scope_name}: {e}"
 
-    @commands.hybrid_command(  # type: ignore
+    @commands.hybrid_command(
         name="sync",
         description="Sync application commands globally and to current guild (Admin Only).",
     )
@@ -53,7 +53,9 @@ class SyncCog(commands.Cog):
             await ctx.send(final_msg)
 
     @sync.error
-    async def on_sync_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
+    async def on_sync_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ) -> None:
         """Handle errors for the sync command."""
         if isinstance(error, commands.MissingPermissions):
             msg = ":x: You need Administrator permissions to run this command."
@@ -65,6 +67,6 @@ class SyncCog(commands.Cog):
             logger.error("Unexpected error in sync command: %s", error)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the SyncCog to the bot."""
     await bot.add_cog(SyncCog(bot))

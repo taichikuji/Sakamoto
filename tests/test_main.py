@@ -48,7 +48,9 @@ async def test_setup_hook_loads_public_extensions_and_continues_after_failure(
 
     assert bot.session is session
     assert bot.load_extension.await_args_list[0].args == ("extensions.general.ping",)
-    assert bot.load_extension.await_args_list[1].args == ("extensions.community.redirect",)
+    assert bot.load_extension.await_args_list[1].args == (
+        "extensions.community.redirect",
+    )
 
 
 @pytest.mark.asyncio

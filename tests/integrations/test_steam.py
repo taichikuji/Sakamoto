@@ -120,7 +120,9 @@ async def test_resolve_steam_id_extracts_profiles_url(monkeypatch, tmp_path):
     bot = DummyBot(db_path=tmp_path / "steam.db", session=DummySession([]))
     cog = SteamCog(bot)
 
-    result = await cog._resolve_steam_id("https://steamcommunity.com/profiles/76561198000000042/")
+    result = await cog._resolve_steam_id(
+        "https://steamcommunity.com/profiles/76561198000000042/"
+    )
 
     assert result == ("76561198000000042", None)
 
@@ -196,10 +198,14 @@ async def test_resolve_steam_id_failures(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_resolve_steam_id_reports_network_errors_without_leaking_details(monkeypatch, tmp_path):
+async def test_resolve_steam_id_reports_network_errors_without_leaking_details(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     cog = SteamCog(
-        DummyBot(db_path=tmp_path / "steam.db", session=DummySession([ClientError("dns")]))
+        DummyBot(
+            db_path=tmp_path / "steam.db", session=DummySession([ClientError("dns")])
+        )
     )
 
     assert await cog._resolve_steam_id("alice") == (
@@ -230,11 +236,15 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
     interaction = _make_interaction()
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam3.db", session=DummySession([])))
     cog._resolve_steam_id = AsyncMock(
-        return_value=(None, "Steam could not find that vanity profile name (success code 42).")
+        return_value=(
+            None,
+            "Steam could not find that vanity profile name (success code 42).",
+        )
     )
     await SteamCog.link_steam.callback(cog, interaction, "alice")
-    assert "Reason: Steam could not find that vanity profile name (success code 42)." in (
-        interaction.followup.send.await_args.args[0]
+    assert (
+        "Reason: Steam could not find that vanity profile name (success code 42)."
+        in (interaction.followup.send.await_args.args[0])
     )
 
     interaction = _make_interaction(user_id=7)
@@ -302,12 +312,15 @@ async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
 
     # Not in game
     interaction = _make_interaction()
-    session = DummySession([DummyResponse(200, {"response": {"players": [{"personaname": "x"}]}})])
+    session = DummySession(
+        [DummyResponse(200, {"response": {"players": [{"personaname": "x"}]}})]
+    )
     cog = SteamCog(DummyBot(db_path=tmp_path / "c.db", session=session))
     cog._get_steam_link = AsyncMock(return_value="76561198000000001")
     await SteamCog.get_lobby.callback(cog, interaction)
     interaction.followup.send.assert_awaited_with(
-        ":x: You are not currently in a joinable game. " "Please start a game and try again."
+        ":x: You are not currently in a joinable game. "
+        "Please start a game and try again."
     )
 
     # Missing lobby
@@ -319,7 +332,11 @@ async def test_get_lobby_handles_player_summary_failures(monkeypatch, tmp_path):
                 {
                     "response": {
                         "players": [
-                            {"gameid": "570", "gameextrainfo": "Dota 2", "lobbysteamid": "0"}
+                            {
+                                "gameid": "570",
+                                "gameextrainfo": "Dota 2",
+                                "lobbysteamid": "0",
+                            }
                         ]
                     }
                 },

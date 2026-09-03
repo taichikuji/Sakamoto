@@ -36,7 +36,7 @@ def normalize_command_name(command_name: str) -> str:
 class HelpCog(commands.Cog):
     """Cog that displays usage from registered application-command metadata."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
 
     async def command_name_autocomplete(
@@ -56,9 +56,13 @@ class HelpCog(commands.Cog):
         name="help",
         description="Shows a list of available commands or details about a specific command.",
     )
-    @app_commands.describe(command_name="Command or subcommand to describe, such as `play`.")
+    @app_commands.describe(
+        command_name="Command or subcommand to describe, such as `play`."
+    )
     @app_commands.autocomplete(command_name=command_name_autocomplete)
-    async def show_help(self, interaction: Interaction, command_name: str | None = None):
+    async def show_help(
+        self, interaction: Interaction, command_name: str | None = None
+    ):
         """Show the command overview or a named command's usage."""
         if command_name is None:
             embed = Embed(
@@ -88,7 +92,11 @@ class HelpCog(commands.Cog):
         parts = normalized_name.split()
         command = self.bot.tree.get_command(parts[0]) if parts else None
         for part in parts[1:]:
-            command = command.get_command(part) if isinstance(command, app_commands.Group) else None
+            command = (
+                command.get_command(part)
+                if isinstance(command, app_commands.Group)
+                else None
+            )
             if command is None:
                 break
 
@@ -118,12 +126,14 @@ class HelpCog(commands.Cog):
                 description=command.description,
                 color=self.bot.color,
             )
-            embed.add_field(name="Usage", value=f"`{command_usage(command)}`", inline=False)
+            embed.add_field(
+                name="Usage", value=f"`{command_usage(command)}`", inline=False
+            )
             if details := parameter_details(command):
                 embed.add_field(name="Parameters", value=details, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the HelpCog to the bot."""
     await bot.add_cog(HelpCog(bot))

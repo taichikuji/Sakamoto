@@ -52,24 +52,17 @@ def test_command_usage_and_parameter_details_come_from_command_metadata():
 @pytest.mark.asyncio
 async def test_command_name_autocomplete_filters_tree_and_limits_choices():
     commands = [
-        SimpleNamespace(qualified_name=f"command-{index}")
-        for index in range(30)
+        SimpleNamespace(qualified_name=f"command-{index}") for index in range(30)
     ]
     commands.append(SimpleNamespace(qualified_name="radio search"))
-    bot = SimpleNamespace(
-        tree=SimpleNamespace(walk_commands=lambda: iter(commands))
-    )
+    bot = SimpleNamespace(tree=SimpleNamespace(walk_commands=lambda: iter(commands)))
 
-    choices = await HelpCog(bot).command_name_autocomplete(
-        SimpleNamespace(), "/RADIO"
-    )
+    choices = await HelpCog(bot).command_name_autocomplete(SimpleNamespace(), "/RADIO")
 
     assert [(choice.name, choice.value) for choice in choices] == [
         ("/radio search", "radio search")
     ]
-    all_choices = await HelpCog(bot).command_name_autocomplete(
-        SimpleNamespace(), ""
-    )
+    all_choices = await HelpCog(bot).command_name_autocomplete(SimpleNamespace(), "")
     assert len(all_choices) == 25
 
 

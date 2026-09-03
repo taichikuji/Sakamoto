@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MusicCog(commands.Cog):
     """Cog for music playback and shared audio controls."""
 
-    def __init__(self, bot: "Sakamoto"):
+    def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.engine = get_audio_engine(bot)
         self.source_cache: dict[str, tuple[float, dict]] = {}
@@ -50,7 +50,7 @@ class MusicCog(commands.Cog):
                     app_commands.Choice(name=s[:100], value=s[:100])
                     for s in (await r.json(content_type=None))[1][:5]
                 ]
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             logger.error("Autocomplete failed for query '%s': %s", query, error)
             return []
 
@@ -66,7 +66,8 @@ class MusicCog(commands.Cog):
             )
             return
 
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if not isinstance(user := interaction.user, Member):
             await interaction.response.send_message(
                 ":x: This command can only be used in a server.", ephemeral=True
@@ -128,7 +129,7 @@ class MusicCog(commands.Cog):
                 followup=interaction.followup.send,
             )
 
-        except Exception as error:  # pylint: disable=broad-exception-caught
+        except Exception as error:
             if not was_connected:
                 await self.engine.disconnect_and_cleanup(guild_id)
             await interaction.followup.send(
@@ -205,7 +206,7 @@ class MusicCog(commands.Cog):
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]
         try:
             expires_at = float(raw_expiry or "")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             expires_at = time() + 30 * 60
         return expires_at - 60
 
@@ -284,7 +285,8 @@ class MusicCog(commands.Cog):
         name="stop", description="Stop the currently playing audio and disconnect."
     )
     async def stop(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
             is None
@@ -299,7 +301,8 @@ class MusicCog(commands.Cog):
         name="pause", description="Pause the currently playing audio."
     )
     async def pause(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -317,7 +320,8 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="resume", description="Resume paused audio.")
     async def resume(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -338,7 +342,8 @@ class MusicCog(commands.Cog):
         description="Show the current music queue, up to 10 items.",
     )
     async def queue(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         max_display = 10
         queue_items = []
 
@@ -347,7 +352,7 @@ class MusicCog(commands.Cog):
             queue_items.append(f"**Now Playing:** {current.title} [{current.duration}]")
 
         for i, item in enumerate(queued[:max_display]):
-            queue_items.append(f"{i+1}. {item.title} [{item.duration}]")
+            queue_items.append(f"{i + 1}. {item.title} [{item.duration}]")
 
         if len(queued) > max_display:
             queue_items.append(f"\n...and {len(queued) - max_display} more.")
@@ -372,7 +377,8 @@ class MusicCog(commands.Cog):
     async def skip(
         self, interaction: Interaction, amount: app_commands.Range[int, 1] = 1
     ):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -408,7 +414,8 @@ class MusicCog(commands.Cog):
         name="shuffle", description="Shuffle the current music queue."
     )
     async def shuffle(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if self.engine.shuffle_queue(guild_id):
             await interaction.response.send_message(
                 ":twisted_rightwards_arrows: Queue shuffled."
@@ -419,6 +426,6 @@ class MusicCog(commands.Cog):
             )
 
 
-async def setup(bot: "Sakamoto"):
+async def setup(bot: Sakamoto):
     """Add the MusicCog to the bot."""
     await bot.add_cog(MusicCog(bot))

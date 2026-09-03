@@ -33,11 +33,17 @@ def _interaction(channel, user=SimpleNamespace(mention="@moderator")):
 @pytest.mark.asyncio
 async def test_clear_filters_messages_by_member_and_reports_scanned_count(monkeypatch):
     monkeypatch.setattr("extensions.moderation.clear.TextChannel", DummyTextChannel)
-    monkeypatch.setattr("extensions.moderation.clear.Thread", type("DummyThread", (), {}))
+    monkeypatch.setattr(
+        "extensions.moderation.clear.Thread", type("DummyThread", (), {})
+    )
     member = SimpleNamespace(display_name="Alice")
     other = SimpleNamespace(display_name="Bob")
     channel = DummyTextChannel(
-        [SimpleNamespace(author=member), SimpleNamespace(author=other), SimpleNamespace(author=member)]
+        [
+            SimpleNamespace(author=member),
+            SimpleNamespace(author=other),
+            SimpleNamespace(author=member),
+        ]
     )
     interaction = _interaction(channel)
 
@@ -63,10 +69,14 @@ async def test_clear_rejects_non_text_channels_without_purging():
 
 @pytest.mark.asyncio
 async def test_clear_permission_error_mentions_requester():
-    interaction = _interaction(SimpleNamespace(), user=SimpleNamespace(mention="@alice"))
+    interaction = _interaction(
+        SimpleNamespace(), user=SimpleNamespace(mention="@alice")
+    )
     cog = ClearCog(SimpleNamespace())
 
-    await cog.clear_error(interaction, app_commands.MissingPermissions(["manage_messages"]))
+    await cog.clear_error(
+        interaction, app_commands.MissingPermissions(["manage_messages"])
+    )
 
     interaction.response.send_message.assert_awaited_once_with(
         ":x: You don't have permission to use this command, @alice.", ephemeral=True
