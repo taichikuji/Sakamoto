@@ -6,7 +6,6 @@ name = "pypi"
 [dev-packages]
 pytest = "*"
 pytest-asyncio = "*"
-mypy = "*"
 ruff = "*"
 
 [packages]
@@ -16,7 +15,6 @@ yt-dlp-ejs = "*"
 aiohttp = "*"
 psutil = "*"
 aiosqlite = "*"
-pynacl = "*"
 
 [requires]
 python_version = "3.14"
