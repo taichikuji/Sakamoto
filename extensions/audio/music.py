@@ -4,9 +4,19 @@ from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
 
-from discord import Embed, Interaction, Member, app_commands
+from discord import (
+    ButtonStyle,
+    Embed,
+    HTTPException,
+    Interaction,
+    Member,
+    Message,
+    app_commands,
+)
 from discord.abc import Messageable
 from discord.ext import commands
+from discord.ui import Button, View, button
+from discord.utils import escape_markdown
 from yt_dlp import YoutubeDL
 
 from ._audio_engine import QueueItem, get_audio_engine
@@ -15,6 +25,78 @@ if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
+
+
+class MusicControls(View):
+    """Short-lived controls attached to a music queue message."""
+
+    def __init__(self, cog: MusicCog, guild_id: int):
+        super().__init__(timeout=10 * 60)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.message: Message | None = None
+
+    def disable(self) -> None:
+        for item in self.children:
+            if isinstance(item, Button):
+                item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable()
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except HTTPException:
+                pass
+
+    @button(emoji="⏯️", style=ButtonStyle.secondary)
+    async def pause_or_resume(self, interaction: Interaction, _button: Button) -> None:
+        if (
+            voice_client := await self.cog.engine.ensure_user_in_same_voice_channel(
+                interaction, self.guild_id
+            )
+        ) is None:
+            return
+        if voice_client.is_paused():
+            voice_client.resume()
+            message = ":arrow_forward: Playback resumed."
+        elif voice_client.is_playing():
+            voice_client.pause()
+            message = ":pause_button: Playback paused."
+        else:
+            message = ":x: Nothing is currently playing."
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @button(emoji="⏹️", style=ButtonStyle.danger)
+    async def stop_playback(self, interaction: Interaction, _button: Button) -> None:
+        await MusicCog.stop.callback(self.cog, interaction)
+        if self.guild_id not in self.cog.engine.sessions:
+            self.disable()
+            self.stop()
+            if interaction.message:
+                try:
+                    await interaction.message.edit(view=self)
+                except HTTPException:
+                    pass
+
+    @button(emoji="⏭️", style=ButtonStyle.primary)
+    async def skip(self, interaction: Interaction, _button: Button) -> None:
+        await MusicCog.skip.callback(self.cog, interaction)
+
+    @button(emoji="🔀", style=ButtonStyle.secondary)
+    async def shuffle(self, interaction: Interaction, _button: Button) -> None:
+        if (
+            await self.cog.engine.ensure_user_in_same_voice_channel(
+                interaction, self.guild_id
+            )
+            is None
+        ):
+            return
+        if self.cog.engine.shuffle_queue(self.guild_id):
+            message = ":twisted_rightwards_arrows: Queue shuffled."
+        else:
+            message = ":x: The music queue is currently empty."
+        await interaction.response.send_message(message, ephemeral=True)
 
 
 class MusicCog(commands.Cog):
@@ -298,46 +380,6 @@ class MusicCog(commands.Cog):
         )
 
     @app_commands.command(
-        name="pause", description="Pause the currently playing audio."
-    )
-    async def pause(self, interaction: Interaction):
-        guild_id = interaction.guild_id
-        assert guild_id is not None
-        if (
-            voice_client := await self.engine.ensure_user_in_same_voice_channel(
-                interaction, guild_id
-            )
-        ) is None:
-            return
-
-        if voice_client.is_playing():
-            voice_client.pause()
-            await interaction.response.send_message(":pause_button: Playback paused.")
-        else:
-            await interaction.response.send_message(
-                ":x: Nothing is currently playing.", ephemeral=True
-            )
-
-    @app_commands.command(name="resume", description="Resume paused audio.")
-    async def resume(self, interaction: Interaction):
-        guild_id = interaction.guild_id
-        assert guild_id is not None
-        if (
-            voice_client := await self.engine.ensure_user_in_same_voice_channel(
-                interaction, guild_id
-            )
-        ) is None:
-            return
-
-        if voice_client.is_paused():
-            voice_client.resume()
-            await interaction.response.send_message(":arrow_forward: Playback resumed.")
-        else:
-            await interaction.response.send_message(
-                ":x: Playback is not paused.", ephemeral=True
-            )
-
-    @app_commands.command(
         name="queue",
         description="Show the current music queue, up to 10 items.",
     )
@@ -345,29 +387,44 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         assert guild_id is not None
         max_display = 10
-        queue_items = []
 
         current, queued = self.engine.queue_snapshot(guild_id)
-        if current:
-            queue_items.append(f"**Now Playing:** {current.title} [{current.duration}]")
-
-        for i, item in enumerate(queued[:max_display]):
-            queue_items.append(f"{i + 1}. {item.title} [{item.duration}]")
-
-        if len(queued) > max_display:
-            queue_items.append(f"\n...and {len(queued) - max_display} more.")
-
-        if not queue_items:
+        if not current and not queued:
             await interaction.response.send_message(
                 ":x: The music queue is currently empty."
             )
-        else:
-            embed = Embed(
-                title=":notes: Music Queue",
-                description="\n".join(queue_items),
-                color=self.bot.color,
+            return
+
+        sections = []
+        if current:
+            sections.append(
+                f"**Now Playing**\n"
+                f"[{escape_markdown(current.title[:100], as_needed=True)}]"
+                f"({current.source_url}) "
+                f"[`{current.duration}`]"
             )
-            await interaction.response.send_message(embed=embed)
+        if queued:
+            sections.append(
+                "**Up Next**\n"
+                + "\n".join(
+                    f"`{i}.` {escape_markdown(item.title[:100], as_needed=True)} "
+                    f"[`{item.duration}`]"
+                    for i, item in enumerate(queued[:max_display], start=1)
+                )
+            )
+        embed = Embed(
+            title="🎵 Music Queue",
+            description="\n\n".join(sections),
+            color=self.bot.color,
+        )
+        queued_count = len(queued)
+        footer = f"{queued_count} track{'s' if queued_count != 1 else ''} queued"
+        if queued_count > max_display:
+            footer += f" • {queued_count - max_display} not shown"
+        embed.set_footer(text=footer)
+        view = MusicControls(self, guild_id)
+        await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
 
     @app_commands.command(
         name="skip",
@@ -409,21 +466,6 @@ class MusicCog(commands.Cog):
             else f":track_next: Skipped {amount} songs."
         )
         await interaction.response.send_message(message)
-
-    @app_commands.command(
-        name="shuffle", description="Shuffle the current music queue."
-    )
-    async def shuffle(self, interaction: Interaction):
-        guild_id = interaction.guild_id
-        assert guild_id is not None
-        if self.engine.shuffle_queue(guild_id):
-            await interaction.response.send_message(
-                ":twisted_rightwards_arrows: Queue shuffled."
-            )
-        else:
-            await interaction.response.send_message(
-                ":x: The music queue is currently empty.", ephemeral=True
-            )
 
 
 async def setup(bot: Sakamoto):
