@@ -168,15 +168,16 @@ class RadioCog(
         if not raw:
             raise ValueError("You must provide a station query, URL, or channel ID.")
 
-        if channel_id := self.extract_channel_id(raw):
-            if channel := (
+        if (channel_id := self.extract_channel_id(raw)) and (
+            channel := (
                 await self.fetch_json(
                     f"{self.RADIO_ENDPOINT}/ara/content/channel/{channel_id}"
                 )
                 or {}
-            ).get("data"):
-                title = channel.get("title") or "Unknown Station"
-                return RadioStation(channel_id, title)
+            ).get("data")
+        ):
+            title = channel.get("title") or "Unknown Station"
+            return RadioStation(channel_id, title)
 
         channel = await self.search_radio_channel(raw)
         if channel is None:

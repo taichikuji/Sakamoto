@@ -54,13 +54,15 @@ class SteamCog(
             await db.commit()
 
     async def _get_steam_link(self, discord_id: int) -> str | None:
-        async with connect(self.bot.db_path) as db:
-            async with db.execute(
+        async with (
+            connect(self.bot.db_path) as db,
+            db.execute(
                 "SELECT steam_id FROM steam_links WHERE discord_id = ?", (discord_id,)
-            ) as cursor:
-                if row := await cursor.fetchone():
-                    return row[0]
-                return None
+            ) as cursor,
+        ):
+            if row := await cursor.fetchone():
+                return row[0]
+            return None
 
     def _steam_http_error_message(self, status: int) -> str:
         if status == 400:

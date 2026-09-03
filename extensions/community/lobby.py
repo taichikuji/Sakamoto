@@ -154,16 +154,18 @@ class LobbyCog(
             await db.commit()
 
     async def _load_generators(self):
-        async with connect(self.bot.db_path) as db:
-            async with db.execute(
-                "SELECT guild_id, channel_id FROM lobby_generator"
-            ) as cursor:
-                self.generators = {row[0]: row[1] async for row in cursor}
+        async with (
+            connect(self.bot.db_path) as db,
+            db.execute("SELECT guild_id, channel_id FROM lobby_generator") as cursor,
+        ):
+            self.generators = {row[0]: row[1] async for row in cursor}
 
     async def _load_lobby_active(self):
-        async with connect(self.bot.db_path) as db:
-            async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
-                self.active_channels = {row[0] async for row in cursor}
+        async with (
+            connect(self.bot.db_path) as db,
+            db.execute("SELECT channel_id FROM lobby_active") as cursor,
+        ):
+            self.active_channels = {row[0] async for row in cursor}
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -256,9 +258,12 @@ class LobbyCog(
         if before.channel == after.channel:
             return
 
-        if before.channel and before.channel.id in self.active_channels:
-            if len(before.channel.members) == 0:
-                await self._delete_lobby(before.channel)
+        if (
+            before.channel
+            and before.channel.id in self.active_channels
+            and len(before.channel.members) == 0
+        ):
+            await self._delete_lobby(before.channel)
 
         if (
             not member.bot

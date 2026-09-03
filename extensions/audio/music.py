@@ -66,7 +66,8 @@ class MusicCog(commands.Cog):
             )
             return
 
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if not isinstance(user := interaction.user, Member):
             await interaction.response.send_message(
                 ":x: This command can only be used in a server.", ephemeral=True
@@ -284,7 +285,8 @@ class MusicCog(commands.Cog):
         name="stop", description="Stop the currently playing audio and disconnect."
     )
     async def stop(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
             is None
@@ -299,7 +301,8 @@ class MusicCog(commands.Cog):
         name="pause", description="Pause the currently playing audio."
     )
     async def pause(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -317,7 +320,8 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="resume", description="Resume paused audio.")
     async def resume(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -338,7 +342,8 @@ class MusicCog(commands.Cog):
         description="Show the current music queue, up to 10 items.",
     )
     async def queue(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         max_display = 10
         queue_items = []
 
@@ -372,7 +377,8 @@ class MusicCog(commands.Cog):
     async def skip(
         self, interaction: Interaction, amount: app_commands.Range[int, 1] = 1
     ):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if (
             voice_client := await self.engine.ensure_user_in_same_voice_channel(
                 interaction, guild_id
@@ -408,7 +414,8 @@ class MusicCog(commands.Cog):
         name="shuffle", description="Shuffle the current music queue."
     )
     async def shuffle(self, interaction: Interaction):
-        assert (guild_id := interaction.guild_id) is not None
+        guild_id = interaction.guild_id
+        assert guild_id is not None
         if self.engine.shuffle_queue(guild_id):
             await interaction.response.send_message(
                 ":twisted_rightwards_arrows: Queue shuffled."

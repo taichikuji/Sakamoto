@@ -360,17 +360,15 @@ class AudioEngine:
         if (
             before.channel == voice_client.channel
             and after.channel != voice_client.channel
+            and len(voice_client.channel.members) == 1
+            and voice_client.channel.members[0] == self.bot.user
         ):
-            if (
-                len(voice_client.channel.members) == 1
-                and voice_client.channel.members[0] == self.bot.user
-            ):
-                await self.disconnect_and_cleanup(guild_id)
+            await self.disconnect_and_cleanup(guild_id)
 
 
 def get_audio_engine(bot: Sakamoto) -> AudioEngine:
     if (engine := getattr(bot, "_audio_engine", None)) is None:
         engine = AudioEngine(bot)
-        setattr(bot, "_audio_engine", engine)
+        bot._audio_engine = engine
         bot.add_listener(engine.handle_voice_state_update, "on_voice_state_update")
     return engine

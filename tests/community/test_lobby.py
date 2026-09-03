@@ -157,21 +157,25 @@ async def test_save_and_remove_generator_updates_memory_and_database(tmp_path):
     await cog._save_generator(101, 202)
     assert cog.generators[101] == 202
 
-    async with connect(bot.db_path) as db:
-        async with db.execute(
+    async with (
+        connect(bot.db_path) as db,
+        db.execute(
             "SELECT channel_id FROM lobby_generator WHERE guild_id = ?", (101,)
-        ) as cursor:
-            row = await cursor.fetchone()
+        ) as cursor,
+    ):
+        row = await cursor.fetchone()
     assert row == (202,)
 
     await cog._remove_generator(101)
     assert 101 not in cog.generators
 
-    async with connect(bot.db_path) as db:
-        async with db.execute(
+    async with (
+        connect(bot.db_path) as db,
+        db.execute(
             "SELECT channel_id FROM lobby_generator WHERE guild_id = ?", (101,)
-        ) as cursor:
-            row = await cursor.fetchone()
+        ) as cursor,
+    ):
+        row = await cursor.fetchone()
     assert row is None
 
 
@@ -193,11 +197,11 @@ async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
     await cog._cleanup_ghost_lobbies()
 
     assert cog.active_channels == {22}
-    async with connect(bot.db_path) as db:
-        async with db.execute(
-            "SELECT channel_id FROM lobby_active ORDER BY channel_id"
-        ) as cursor:
-            rows = await cursor.fetchall()
+    async with (
+        connect(bot.db_path) as db,
+        db.execute("SELECT channel_id FROM lobby_active ORDER BY channel_id") as cursor,
+    ):
+        rows = await cursor.fetchall()
     assert rows == [(22,)]
 
 
@@ -420,9 +424,11 @@ async def test_create_lobby_cleans_up_when_member_move_fails(tmp_path):
     new_channel.delete.assert_awaited_once()
     assert cog.active_channels == set()
     assert cog.control_views == {}
-    async with connect(bot.db_path) as db:
-        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
-            assert await cursor.fetchall() == []
+    async with (
+        connect(bot.db_path) as db,
+        db.execute("SELECT channel_id FROM lobby_active") as cursor,
+    ):
+        assert await cursor.fetchall() == []
 
 
 @pytest.mark.asyncio
@@ -447,9 +453,11 @@ async def test_delete_lobby_removes_tracking_when_discord_delete_fails(tmp_path)
     assert view.is_finished()
     assert cog.active_channels == set()
     assert cog.control_views == {}
-    async with connect(bot.db_path) as db:
-        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
-            assert await cursor.fetchall() == []
+    async with (
+        connect(bot.db_path) as db,
+        db.execute("SELECT channel_id FROM lobby_active") as cursor,
+    ):
+        assert await cursor.fetchall() == []
 
 
 @pytest.mark.asyncio
@@ -509,6 +517,8 @@ async def test_create_lobby_rolls_back_database_when_control_message_fails(tmp_p
     new_channel.delete.assert_awaited_once()
     assert cog.active_channels == set()
     assert cog.control_views == {}
-    async with connect(bot.db_path) as db:
-        async with db.execute("SELECT channel_id FROM lobby_active") as cursor:
-            assert await cursor.fetchall() == []
+    async with (
+        connect(bot.db_path) as db,
+        db.execute("SELECT channel_id FROM lobby_active") as cursor,
+    ):
+        assert await cursor.fetchall() == []
