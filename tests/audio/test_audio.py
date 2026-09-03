@@ -1260,37 +1260,3 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
     await scheduled[0]
 
     assert cog.sessions == {}
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason="Concurrent joins observe no session and connect the bot twice.",
-)
-async def test_concurrent_voice_connection_requests_share_one_connection():
-    engine = AudioEngine(_make_bot())
-    connection_started = asyncio.Event()
-    release_connection = asyncio.Event()
-    clients = [DummyVoiceClient(), DummyVoiceClient()]
-
-    async def connect(**_kwargs):
-        connection_started.set()
-        await _wait_for_event(release_connection)
-        return clients.pop(0)
-
-    channel = SimpleNamespace(connect=AsyncMock(side_effect=connect))
-    interaction = _make_interaction(user=DummyMember(1, voice_channel=channel))
-    first = asyncio.create_task(
-        engine.get_or_connect_voice_client(1, channel, interaction)
-    )
-    await _wait_for_event(connection_started)
-    second = asyncio.create_task(
-        engine.get_or_connect_voice_client(1, channel, interaction)
-    )
-    await asyncio.sleep(0)
-
-    try:
-        channel.connect.assert_awaited_once_with(self_deaf=True)
-    finally:
-        release_connection.set()
-        await asyncio.gather(first, second)

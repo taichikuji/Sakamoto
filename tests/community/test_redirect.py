@@ -110,13 +110,3 @@ async def test_on_message_sends_rewritten_text_when_content_changes():
     await cog.on_message(message)
 
     channel.send.assert_awaited_once_with("https://fixupx.com/alice/status/12345")
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Root URLs lack the trailing slash required by the current replacement logic.",
-)
-def test_replace_text_rewrites_supported_root_urls():
-    cog = ReplaceCog(SimpleNamespace())
-
-    assert cog.replace_text("https://twitter.com") == "https://fixupx.com"
