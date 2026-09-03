@@ -16,7 +16,7 @@ from extensions.audio._audio_engine import (
     QueueItem,
     get_audio_engine,
 )
-from extensions.audio.music import MusicCog
+from extensions.audio.music import MusicCog, MusicControls
 from extensions.audio.radio import RadioCog, RadioStation
 
 
@@ -140,12 +140,15 @@ def _make_bot(*, session=None):
 
 
 def _make_interaction(*, user, guild_id=1):
+    message = SimpleNamespace(edit=AsyncMock())
     return SimpleNamespace(
         guild_id=guild_id,
         user=user,
         channel=SimpleNamespace(send=AsyncMock()),
         response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()),
+        message=message,
+        original_response=AsyncMock(return_value=message),
     )
 
 
@@ -333,7 +336,8 @@ async def test_ensure_user_in_same_voice_channel_rejects_other_channel(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "command", [MusicCog.stop, MusicCog.pause, MusicCog.resume, MusicCog.skip]
+    "command",
+    [MusicCog.stop, MusicCog.skip],
 )
 async def test_control_commands_return_early_when_same_channel_check_fails(command):
     interaction = _make_interaction(user=object(), guild_id=1)
@@ -1142,19 +1146,69 @@ async def test_enqueue_or_play_rejects_when_queue_is_full():
 
 
 @pytest.mark.asyncio
-async def test_queue_displays_queued_items():
+async def test_queue_displays_playback_state():
     interaction = _make_interaction(user=object(), guild_id=1)
     cog = MusicCog(_make_bot())
+    current = QueueItem("https://example.test/current", "Current *Track*", "2:00")
     _add_session(
         cog.engine,
         DummyVoiceClient(),
-        queue=[QueueItem("url", "Queued Track", "3:00")],
+        current=current,
+        queue=[
+            QueueItem("url", f"Queued Track {number}", "3:00")
+            for number in range(1, 12)
+        ],
     )
 
     await MusicCog.queue.callback(cog, interaction)
 
     embed = interaction.response.send_message.await_args.kwargs["embed"]
-    assert embed.description == "1. Queued Track [3:00]"
+    view = interaction.response.send_message.await_args.kwargs["view"]
+    assert embed.title == "🎵 Music Queue"
+    assert embed.description.startswith(
+        "**Now Playing**\n"
+        "[Current \\*Track*](https://example.test/current) [`2:00`]\n\n"
+        "**Up Next**"
+    )
+    assert "`10.` Queued Track 10 [`3:00`]" in embed.description
+    assert "Queued Track 11" not in embed.description
+    assert embed.fields == []
+    assert embed.footer.text == "11 tracks queued • 1 not shown"
+    assert isinstance(view, MusicControls)
+    assert [str(item.emoji) for item in view.children] == ["⏯️", "⏹️", "⏭️", "🔀"]
+
+
+@pytest.mark.asyncio
+async def test_queue_controls_control_playback():
+    interaction = _make_interaction(user=object(), guild_id=1)
+    cog = MusicCog(_make_bot())
+    voice_client = DummyVoiceClient(playing=True)
+    _add_session(cog.engine, voice_client)
+    cog.engine.ensure_user_in_same_voice_channel = AsyncMock(return_value=voice_client)
+    view = MusicControls(cog, 1)
+
+    await view.children[0].callback(interaction)
+    voice_client._playing = False
+    voice_client._paused = True
+    await view.children[0].callback(interaction)
+    voice_client._playing = True
+    voice_client._paused = False
+    await view.children[2].callback(interaction)
+    cog.engine.shuffle_queue = MagicMock(return_value=True)
+    await view.children[3].callback(interaction)
+
+    voice_client.pause.assert_called_once()
+    voice_client.resume.assert_called_once()
+    voice_client.stop.assert_called_once()
+    cog.engine.shuffle_queue.assert_called_once_with(1)
+
+    cog.engine.disconnect_and_cleanup = AsyncMock(
+        side_effect=lambda guild_id: cog.engine.sessions.pop(guild_id, None)
+    )
+    await view.children[1].callback(interaction)
+
+    cog.engine.disconnect_and_cleanup.assert_awaited_once_with(1)
+    assert all(item.disabled for item in view.children)
 
 
 @pytest.mark.asyncio
