@@ -1,5 +1,5 @@
 import logging
-from asyncio import Future, gather, get_running_loop
+from asyncio import Future, TimerHandle, gather, get_running_loop
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -107,6 +107,8 @@ class MusicCog(commands.Cog):
         self.engine = get_audio_engine(bot)
         self.source_cache: dict[str, tuple[float, dict]] = {}
         self.source_lookups: dict[str, Future[dict]] = {}
+        self.cache_expiry: TimerHandle | None = None
+        self.cache_enabled = True
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.guild_id is not None:
@@ -242,7 +244,30 @@ class MusicCog(commands.Cog):
             )
         if not info or (not is_url and "entries" in info and not info["entries"]):
             raise ValueError("No results found.")
-        return info
+        return self.playback_metadata(info)
+
+    @staticmethod
+    def playback_metadata(info: dict) -> dict:
+        """Retain only fields used to build queue entries and refresh streams."""
+        fields = (
+            "_type",
+            "id",
+            "extractor_key",
+            "webpage_url",
+            "original_url",
+            "url",
+            "title",
+            "duration",
+            "duration_string",
+        )
+        result = {key: info[key] for key in fields if key in info}
+        if "entries" in info:
+            result["entries"] = [
+                MusicCog.playback_metadata(entry)
+                for entry in info.get("entries") or []
+                if entry
+            ]
+        return result
 
     async def resolve_source(self, query: str) -> dict:
         """Reuse yt-dlp results until their signed stream URL expires."""
@@ -267,10 +292,7 @@ class MusicCog(commands.Cog):
         if not is_playlist and (stream_url := self.first_track(info).get("url")):
             expires_at = self.stream_valid_until(stream_url)
 
-        if expires_at > (now := time()):
-            self.source_cache = {
-                key: value for key, value in self.source_cache.items() if value[0] > now
-            }
+        if self.cache_enabled and expires_at > time():
             self.source_cache[key] = (expires_at, info)
             if not is_playlist:
                 track_info = self.first_track(info)
@@ -278,7 +300,22 @@ class MusicCog(commands.Cog):
                     self.source_cache[source_url] = (expires_at, track_info)
             while len(self.source_cache) > 256:
                 self.source_cache.pop(next(iter(self.source_cache)))
+            self._expire_sources()
         return info
+
+    def _expire_sources(self) -> None:
+        if self.cache_expiry is not None:
+            self.cache_expiry.cancel()
+            self.cache_expiry = None
+        now = time()
+        self.source_cache = {
+            key: value for key, value in self.source_cache.items() if value[0] > now
+        }
+        if self.source_cache:
+            delay = min(value[0] for value in self.source_cache.values()) - now
+            self.cache_expiry = get_running_loop().call_later(
+                delay, self._expire_sources
+            )
 
     async def refresh_stream_url(self, source_url: str) -> str | None:
         info = await self.resolve_source(source_url)
@@ -361,7 +398,12 @@ class MusicCog(commands.Cog):
         return items
 
     async def cog_unload(self):
+        # In-flight lookups and queued tracks must not refill an unloaded cache.
+        self.cache_enabled = False
         self.source_cache.clear()
+        if self.cache_expiry is not None:
+            self.cache_expiry.cancel()
+            self.cache_expiry = None
 
     @app_commands.command(
         name="stop", description="Stop the currently playing audio and disconnect."

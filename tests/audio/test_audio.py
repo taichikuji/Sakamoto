@@ -92,6 +92,10 @@ class DummyVoiceClient:
 
 
 class DummyLoop:
+    call_later = staticmethod(
+        lambda *args: asyncio.get_running_loop().call_later(*args)
+    )
+
     def __init__(self, result):
         self.result = result
 
@@ -100,6 +104,8 @@ class DummyLoop:
 
 
 class ImmediateLoop:
+    call_later = staticmethod(DummyLoop.call_later)
+
     async def run_in_executor(self, _executor, function, argument):
         return function(argument)
 
@@ -711,7 +717,9 @@ async def test_play_connects_before_enqueue(monkeypatch):
 
     monkeypatch.setattr(
         "extensions.audio.music.get_running_loop",
-        lambda: SimpleNamespace(run_in_executor=lookup),
+        lambda: SimpleNamespace(
+            run_in_executor=lookup, call_later=asyncio.get_running_loop().call_later
+        ),
     )
 
     await MusicCog.play.callback(cog, interaction, query="track")
@@ -753,7 +761,9 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
     voice_channel.connect.side_effect = connect
     monkeypatch.setattr(
         "extensions.audio.music.get_running_loop",
-        lambda: SimpleNamespace(run_in_executor=lookup),
+        lambda: SimpleNamespace(
+            run_in_executor=lookup, call_later=asyncio.get_running_loop().call_later
+        ),
     )
 
     await asyncio.wait_for(
@@ -910,6 +920,8 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
     info = {"url": f"https://stream.test/audio?expire={int(time()) + 3600}"}
 
     class LookupLoop:
+        call_later = staticmethod(DummyLoop.call_later)
+
         calls = 0
 
         def run_in_executor(self, _executor, _function, _argument):
@@ -1244,7 +1256,7 @@ async def test_bot_disconnects_when_moved_to_empty_voice_channel():
 async def test_disconnect_and_cleanup_clears_all_state():
     vc = DummyVoiceClient(connected=True, playing=True)
     cog = AudioEngine(_make_bot())
-    _add_session(
+    session = _add_session(
         cog,
         vc,
         queue=[QueueItem("u", "t", "d")],
@@ -1252,7 +1264,16 @@ async def test_disconnect_and_cleanup_clears_all_state():
         command_channel=object(),
     )
 
+    metadata_at_disconnect = []
+
+    async def disconnect():
+        metadata_at_disconnect.append(
+            (tuple(session.queue), session.current, session.command_channel)
+        )
+
+    vc.disconnect.side_effect = disconnect
     await cog.disconnect_and_cleanup(1)
+    assert metadata_at_disconnect == [((), None, None)]
 
     vc.stop.assert_called_once()
     vc.disconnect.assert_awaited_once()
@@ -1314,3 +1335,52 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
     await scheduled[0]
 
     assert cog.sessions == {}
+
+
+def test_search_source_retains_only_playback_metadata(monkeypatch):
+    track = {"title": "Track", "url": "stream", "duration": 60}
+    raw = {
+        "entries": [
+            None,
+            {**track, "formats": ["unused"], "description": "x" * 1000000},
+        ]
+    }
+    ydl = MagicMock()
+    ydl.__enter__.return_value.extract_info.return_value = raw
+    monkeypatch.setattr("extensions.audio.music.YoutubeDL", MagicMock(return_value=ydl))
+
+    assert MusicCog(_make_bot()).search_source("track") == {"entries": [track]}
+
+
+@pytest.mark.asyncio
+async def test_cache_expires_without_another_request(monkeypatch):
+    cog = MusicCog(_make_bot())
+    loop = ImmediateLoop()
+    loop.call_later = MagicMock()
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", lambda: loop)
+    monkeypatch.setattr("extensions.audio.music.time", lambda: 100)
+    cog.search_source = lambda _query: {"url": "stream"}
+    cog.stream_valid_until = lambda _url: 110
+    await cog.resolve_source("track")
+    assert cog.source_cache
+    delay, expire = loop.call_later.call_args.args
+    assert delay == 10
+    monkeypatch.setattr("extensions.audio.music.time", lambda: 110)
+    expire()
+    assert cog.source_cache == {}
+    assert cog.cache_expiry is None
+    loop.call_later.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_unload_cancels_expiry_and_prevents_cache_refill(monkeypatch):
+    cog = MusicCog(_make_bot())
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
+    cog.search_source = lambda _query: {"url": "stream"}
+    await cog.resolve_source("track")
+    timer = cog.cache_expiry
+    await cog.cog_unload()
+    assert timer.cancelled()
+    await cog.resolve_source("queued track")
+    assert cog.source_cache == {}
+    assert cog.cache_expiry is None

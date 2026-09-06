@@ -304,6 +304,9 @@ class AudioEngine:
 
     async def disconnect_and_cleanup(self, guild_id: int) -> None:
         if session := self.sessions.pop(guild_id, None):
+            session.queue.clear()
+            session.current = None
+            session.command_channel = None
             try:
                 session.voice_client.stop()
                 if session.voice_client.is_connected():
