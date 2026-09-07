@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiosqlite import connect
-from discord import PermissionOverwrite
+from discord import NotFound, PermissionOverwrite, VoiceChannel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -180,29 +180,60 @@ async def test_save_and_remove_generator_updates_memory_and_database(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_ghost_lobbies_removes_missing_channels(tmp_path):
+async def test_cleanup_ghost_lobbies_reconciles_missing_empty_and_occupied(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
     await _init_test_db(cog)
-    cog.active_channels = {11, 22}
-    bot._channels[22] = object()
+    cog.active_channels = {11, 22, 33}
+    empty_channel = Mock(spec=VoiceChannel)
+    empty_channel.id = 22
+    empty_channel.members = []
+    empty_channel.delete = AsyncMock()
+    occupied_channel = Mock(spec=VoiceChannel)
+    occupied_channel.id = 33
+    occupied_channel.members = [object()]
+    occupied_channel.delete = AsyncMock()
+    bot._channels[22] = empty_channel
+    bot._channels[33] = occupied_channel
 
     async with connect(bot.db_path) as db:
         await db.executemany(
             "INSERT INTO lobby_active (channel_id) VALUES (?)",
-            [(11,), (22,)],
+            [(11,), (22,), (33,)],
         )
         await db.commit()
 
     await cog._cleanup_ghost_lobbies()
 
-    assert cog.active_channels == {22}
+    empty_channel.delete.assert_awaited_once_with(reason="Dynamic channel empty")
+    occupied_channel.delete.assert_not_awaited()
+    assert cog.active_channels == {33}
     async with (
         connect(bot.db_path) as db,
         db.execute("SELECT channel_id FROM lobby_active ORDER BY channel_id") as cursor,
     ):
         rows = await cursor.fetchall()
-    assert rows == [(22,)]
+    assert rows == [(33,)]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_ghost_lobbies_routes_each_recovery_state(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    cog.active_channels = {11, 22, 33}
+    cog._remove_lobby_tracking = AsyncMock()
+    cog._delete_lobby = AsyncMock()
+    empty_channel = Mock(spec=VoiceChannel)
+    empty_channel.members = []
+    occupied_channel = Mock(spec=VoiceChannel)
+    occupied_channel.members = [object()]
+    bot._channels[22] = empty_channel
+    bot._channels[33] = occupied_channel
+
+    await cog._cleanup_ghost_lobbies()
+
+    cog._remove_lobby_tracking.assert_awaited_once_with({11})
+    cog._delete_lobby.assert_awaited_once_with(empty_channel)
 
 
 @pytest.mark.asyncio
@@ -346,14 +377,14 @@ async def test_cog_load_restores_generators_and_active_lobbies(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_on_ready_cleans_ghost_lobbies_only_once(tmp_path):
+async def test_on_ready_reconciles_lobbies_after_each_ready_event(tmp_path):
     cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
     cog._cleanup_ghost_lobbies = AsyncMock()
 
     await cog.on_ready()
     await cog.on_ready()
 
-    cog._cleanup_ghost_lobbies.assert_awaited_once()
+    assert cog._cleanup_ghost_lobbies.await_count == 2
 
 
 def test_cog_unload_stops_and_forgets_all_control_views(tmp_path):
@@ -432,7 +463,36 @@ async def test_create_lobby_cleans_up_when_member_move_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_lobby_removes_tracking_when_discord_delete_fails(tmp_path):
+async def test_create_lobby_tracks_channel_before_moving_member(tmp_path):
+    bot = DummyBot(tmp_path / "lobby.db")
+    cog = LobbyCog(bot)
+    call_order = []
+    cog._add_lobby_tracking = AsyncMock(
+        side_effect=lambda channel_id: call_order.append(("track", channel_id))
+    )
+    new_channel = SimpleNamespace(id=303, delete=AsyncMock(), send=AsyncMock())
+    guild = SimpleNamespace(create_voice_channel=AsyncMock(return_value=new_channel))
+
+    class DummyMember:
+        display_name = "Owner"
+        mention = "@Owner"
+
+        def __init__(self):
+            self.guild = guild
+            self.move_to = AsyncMock(
+                side_effect=lambda channel: call_order.append(("move", channel.id))
+            )
+
+    member = DummyMember()
+    generator = SimpleNamespace(category=None, overwrites={})
+
+    await cog._create_lobby(member, generator)
+
+    assert call_order == [("track", new_channel.id), ("move", new_channel.id)]
+
+
+@pytest.mark.asyncio
+async def test_delete_lobby_keeps_tracking_when_discord_delete_fails(tmp_path):
     bot = DummyBot(tmp_path / "lobby.db")
     cog = LobbyCog(bot)
     await _init_test_db(cog)
@@ -450,11 +510,48 @@ async def test_delete_lobby_removes_tracking_when_discord_delete_fails(tmp_path)
 
     await cog._delete_lobby(channel)
 
-    assert view.is_finished()
-    assert cog.active_channels == set()
-    assert cog.control_views == {}
+    assert not view.is_finished()
+    assert cog.active_channels == {channel.id}
+    assert cog.control_views == {channel.id: view}
     async with (
         connect(bot.db_path) as db,
         db.execute("SELECT channel_id FROM lobby_active") as cursor,
     ):
-        assert await cursor.fetchall() == []
+        assert await cursor.fetchall() == [(channel.id,)]
+
+
+@pytest.mark.asyncio
+async def test_delete_lobby_keeps_tracking_after_failure_and_allows_retry(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._remove_lobby_tracking = AsyncMock()
+    channel = SimpleNamespace(
+        id=303, delete=AsyncMock(side_effect=RuntimeError("forbidden"))
+    )
+    view = VoiceControlView(DummyVoiceChannel(), object())
+    cog.control_views[channel.id] = view
+
+    await cog._delete_lobby(channel)
+
+    cog._remove_lobby_tracking.assert_not_awaited()
+    assert not view.is_finished()
+    assert cog.control_views == {channel.id: view}
+
+    channel.delete.side_effect = None
+    await cog._delete_lobby(channel)
+
+    cog._remove_lobby_tracking.assert_awaited_once_with({channel.id})
+
+
+@pytest.mark.asyncio
+async def test_delete_lobby_forgets_tracking_after_discord_not_found(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    cog._remove_lobby_tracking = AsyncMock()
+    response = SimpleNamespace(status=404, reason="Not Found")
+    channel = SimpleNamespace(
+        id=303,
+        delete=AsyncMock(side_effect=NotFound(response, "Unknown Channel")),
+    )
+
+    await cog._delete_lobby(channel)
+
+    cog._remove_lobby_tracking.assert_awaited_once_with({channel.id})

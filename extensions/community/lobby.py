@@ -169,24 +169,50 @@ class LobbyCog(
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if not hasattr(self, "_lobbies_cleaned"):
-            await self._cleanup_ghost_lobbies()
-            self._lobbies_cleaned = True
+        await self._cleanup_ghost_lobbies()
 
     async def _cleanup_ghost_lobbies(self):
-        if ghost_ids := {
-            channel_id
-            for channel_id in self.active_channels
-            if self.bot.get_channel(channel_id) is None
-        }:
+        ghost_ids: set[int] = set()
+        empty_channels: list[VoiceChannel | StageChannel] = []
+
+        for channel_id in self.active_channels:
+            if (channel := self.bot.get_channel(channel_id)) is None:
+                ghost_ids.add(channel_id)
+            elif (
+                isinstance(channel, (VoiceChannel, StageChannel))
+                and not channel.members
+            ):
+                empty_channels.append(channel)
+
+        if ghost_ids:
             logger.info("Cleaning up %d ghost lobby channel(s).", len(ghost_ids))
-            async with connect(self.bot.db_path) as db:
-                await db.executemany(
-                    "DELETE FROM lobby_active WHERE channel_id = ?",
-                    [(channel_id,) for channel_id in ghost_ids],
-                )
-                await db.commit()
-            self.active_channels -= ghost_ids
+            await self._remove_lobby_tracking(ghost_ids)
+
+        if empty_channels:
+            logger.info("Cleaning up %d empty lobby channel(s).", len(empty_channels))
+            for channel in empty_channels:
+                await self._delete_lobby(channel)
+
+    async def _add_lobby_tracking(self, channel_id: int) -> None:
+        async with connect(self.bot.db_path) as db:
+            await db.execute(
+                "INSERT INTO lobby_active (channel_id) VALUES (?)", (channel_id,)
+            )
+            await db.commit()
+        self.active_channels.add(channel_id)
+
+    async def _remove_lobby_tracking(self, channel_ids: set[int]) -> None:
+        async with connect(self.bot.db_path) as db:
+            await db.executemany(
+                "DELETE FROM lobby_active WHERE channel_id = ?",
+                [(channel_id,) for channel_id in channel_ids],
+            )
+            await db.commit()
+
+        self.active_channels.difference_update(channel_ids)
+        for channel_id in channel_ids:
+            if view := self.control_views.pop(channel_id, None):
+                view.stop()
 
     async def _save_generator(self, guild_id: int, channel_id: int):
         async with connect(self.bot.db_path) as db:
@@ -289,15 +315,8 @@ class LobbyCog(
         )
 
         try:
+            await self._add_lobby_tracking(new_channel.id)
             await member.move_to(new_channel)
-            self.active_channels.add(new_channel.id)
-
-            async with connect(self.bot.db_path) as db:
-                await db.execute(
-                    "INSERT INTO lobby_active (channel_id) VALUES (?)",
-                    (new_channel.id,),
-                )
-                await db.commit()
 
             embed = Embed(
                 title=":control_knobs: Voice Control",
@@ -315,27 +334,18 @@ class LobbyCog(
             logger.error(
                 "Failed to set up lobby for %s: %s", member.display_name, error
             )
-            if view := self.control_views.pop(new_channel.id, None):
-                view.stop()
-            self.active_channels.discard(new_channel.id)
-            await new_channel.delete()
+            await self._delete_lobby(new_channel)
 
     async def _delete_lobby(self, channel: VoiceChannel | StageChannel) -> None:
-        if view := self.control_views.pop(channel.id, None):
-            view.stop()
-
         try:
             await channel.delete(reason="Dynamic channel empty")
+        except NotFound:
+            pass
         except Exception as error:
             logger.error("Failed to delete lobby channel %s: %s", channel.id, error)
+            return
 
-        self.active_channels.discard(channel.id)
-
-        async with connect(self.bot.db_path) as db:
-            await db.execute(
-                "DELETE FROM lobby_active WHERE channel_id = ?", (channel.id,)
-            )
-            await db.commit()
+        await self._remove_lobby_tracking({channel.id})
 
 
 async def setup(bot: Sakamoto):
