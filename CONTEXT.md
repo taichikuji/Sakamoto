@@ -13,9 +13,6 @@ Sakamoto is a voice-first Discord bot. Use the following terms consistently.
 | **Temporary Rejoin Ban** | Short-lived channel permission block after a Voice Votekick. | Permanent ban, mute |
 | **Server Moderator** | Member with elevated Discord permissions who configures or safeguards the bot. | Owner*, staff |
 | **Steam Link** | Persisted mapping of a Discord user to a SteamID64. | Steam account cache, token |
-| **Pipenv Environment** | Repository's canonical dependency and command environment. | Global pip, ad-hoc virtualenv |
-| **Optional Integration** | Feature module that may be unavailable without harming core voice use. | Required module, core dependency |
-| **Degraded Capability** | Non-core feature unavailable while core slash commands and voice workflows continue. | Outage, crash |
 
 \* Use “owner” only for the literal Discord server owner.
 
@@ -25,11 +22,14 @@ Sakamoto is a voice-first Discord bot. Use the following terms consistently.
 - A guild has zero or one active Playback Session, containing zero or more Queue Entries.
 - A user has zero or one Steam Link.
 - A successful Voice Votekick creates one Temporary Rejoin Ban for its target in that channel.
-- Optional Integration failures are Degraded Capabilities unless core workflows fail.
-- Install dependencies and run commands through Pipenv (`pipenv sync`, `pipenv run ...`).
+
+## Music runtime behavior
+
+- yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-entry cap and automatic expiry.
+- FFmpeg runs as a child process during playback and exits when playback stops; disconnect cleanup removes the guild's Playback Session and clears its queue, current track, and command channel.
+- Repeated extraction and playback can leave the process at a higher RSS plateau after live objects are released because Python and glibc may retain freed pages. Stable elevated RSS alone does not establish a live-object leak.
 
 ## Resolved ambiguities
 
 - “Lobby” means Generator Channel (trigger) or Temporary Lobby (generated), never both.
 - “Kick” means Voice Votekick for voice-only removal; use Discord server kick for the server action.
-- Do not call optional-integration failure a “broken bot” unless core voice flows fail.

@@ -3,6 +3,7 @@ services:
     build: ./
     # image: ghcr.io/taichikuji/sakamoto
     restart: unless-stopped
+    mem_limit: 512m
     container_name: sakamoto
     environment:
       - TOKEN=${TOKEN}

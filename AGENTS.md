@@ -9,7 +9,6 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 - Keep Discord code asynchronous; do not introduce blocking work.
 - Reuse shared resources, including the bot's `aiohttp.ClientSession`.
 - Optional integrations must fail gracefully: preserve core slash-command and voice workflows.
-- If behavior is unclear, inspect code, tests, and docs rather than guessing.
 
 ## Structure
 
@@ -21,4 +20,4 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 
 ## Verify
 
-Run the tests for the changed subsystem, then the full suite when practical. Run audio tests for music or audio changes.
+Run the tests for the changed subsystem, then the full suite when practical.
