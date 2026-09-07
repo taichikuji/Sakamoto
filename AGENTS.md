@@ -6,6 +6,8 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 
 - Make the smallest complete change; avoid unrelated refactors, dependencies, and behavior changes.
 - Never expose or commit secrets.
+- If behavior is unclear, inspect the code, tests, and documentation instead of guessing.
+- Use Pipenv for dependency management and commands (`pipenv sync`, `pipenv run ...`).
 - Keep Discord code asynchronous; do not introduce blocking work.
 - Reuse shared resources, including the bot's `aiohttp.ClientSession`.
 - Optional integrations must fail gracefully: preserve core slash-command and voice workflows.
@@ -20,4 +22,4 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 
 ## Verify
 
-Run the tests for the changed subsystem, then the full suite when practical.
+Run tests for the changed subsystem, including audio tests for music or audio changes, then the full suite when practical.
