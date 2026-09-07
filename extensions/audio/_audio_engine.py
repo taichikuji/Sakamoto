@@ -2,7 +2,7 @@ import logging
 from asyncio import run_coroutine_threadsafe
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from random import shuffle
 from typing import TYPE_CHECKING
 
@@ -111,7 +111,7 @@ class AudioEngine:
                 return
 
             if item.duration != "LIVE":
-                item = replace(item, stream_url=None)
+                item.stream_url = None
             session.queue.append(item)
             await followup(
                 queue_message
@@ -308,9 +308,10 @@ class AudioEngine:
             session.current = None
             session.command_channel = None
             try:
-                session.voice_client.stop()
                 if session.voice_client.is_connected():
                     await session.voice_client.disconnect()
+                else:
+                    session.voice_client.stop()
             except Exception as error:
                 logger.error(
                     "Error during disconnect for guild %s: %s", guild_id, error
@@ -321,7 +322,9 @@ class AudioEngine:
             logger.error("Player error for guild %s: %s", guild_id, error)
 
         session = self.sessions.get(guild_id)
-        if session is None or not session.voice_client.is_connected():
+        if session is None:
+            return
+        if not session.voice_client.is_connected():
             run_coroutine_threadsafe(
                 self.disconnect_and_cleanup(guild_id), self.bot.loop
             )
@@ -350,13 +353,8 @@ class AudioEngine:
             await self.disconnect_and_cleanup(guild_id)
             return
 
-        if member.bot:
-            if (
-                self.bot.user
-                and member.id == self.bot.user.id
-                and after.channel
-                and len(after.channel.members) == 1
-            ):
+        if self.bot.user and member.id == self.bot.user.id:
+            if after.channel and len(after.channel.members) == 1:
                 await self.disconnect_and_cleanup(guild_id)
             return
 

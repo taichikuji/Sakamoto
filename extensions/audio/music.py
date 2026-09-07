@@ -195,7 +195,7 @@ class MusicCog(commands.Cog):
                 raise info
             self.engine.set_command_channel(guild_id, cast(Messageable, channel))
 
-            if self.is_url(query) and info.get("_type") in ["playlist", "multi_video"]:
+            if self._is_url(query) and info.get("_type") in ["playlist", "multi_video"]:
                 entries = list(info.get("entries") or [])
                 if not entries:
                     raise ValueError("The playlist is empty or private.")
@@ -209,7 +209,7 @@ class MusicCog(commands.Cog):
 
             await self.engine.enqueue_or_play(
                 guild_id,
-                self.queue_item(self.first_track(info), requested_url=query),
+                self.queue_item(self._first_track(info), requested_url=query),
                 followup=interaction.followup.send,
             )
 
@@ -222,7 +222,7 @@ class MusicCog(commands.Cog):
 
     def search_source(self, query: str) -> dict:
         """Resolve one complete result, or a flat playlist."""
-        is_url = self.is_url(query)
+        is_url = self._is_url(query)
         options: dict[str, Any] = {
             "format": "ba[acodec=opus]/ba[ext=m4a]/bestaudio/best",
             "quiet": True,
@@ -244,10 +244,10 @@ class MusicCog(commands.Cog):
             )
         if not info or (not is_url and "entries" in info and not info["entries"]):
             raise ValueError("No results found.")
-        return self.playback_metadata(info)
+        return self._playback_metadata(info)
 
     @staticmethod
-    def playback_metadata(info: dict) -> dict:
+    def _playback_metadata(info: dict) -> dict:
         """Retain only fields used to build queue entries and refresh streams."""
         fields = (
             "_type",
@@ -263,7 +263,7 @@ class MusicCog(commands.Cog):
         result = {key: info[key] for key in fields if key in info}
         if "entries" in info:
             result["entries"] = [
-                MusicCog.playback_metadata(entry)
+                MusicCog._playback_metadata(entry)
                 for entry in info.get("entries") or []
                 if entry
             ]
@@ -271,7 +271,8 @@ class MusicCog(commands.Cog):
 
     async def resolve_source(self, query: str) -> dict:
         """Reuse yt-dlp results until their signed stream URL expires."""
-        key = query.strip() if self.is_url(query) else query.strip().casefold()
+        is_url = self._is_url(query)
+        key = query.strip() if is_url else query.strip().casefold()
         if (cached := self.source_cache.get(key)) and cached[0] > time():
             return cached[1]
 
@@ -284,22 +285,20 @@ class MusicCog(commands.Cog):
             info = await lookup
         finally:
             self.source_lookups.pop(key, None)
-        is_playlist = self.is_url(query) and info.get("_type") in [
+        is_playlist = is_url and info.get("_type") in [
             "playlist",
             "multi_video",
         ]
         expires_at = time() + 15 * 60
-        if not is_playlist and (stream_url := self.first_track(info).get("url")):
+        if not is_playlist and (stream_url := self._first_track(info).get("url")):
             expires_at = self.stream_valid_until(stream_url)
 
         if self.cache_enabled and expires_at > time():
             self.source_cache[key] = (expires_at, info)
             if not is_playlist:
-                track_info = self.first_track(info)
-                if source_url := self.source_url(track_info, requested_url=query):
+                track_info = self._first_track(info)
+                if source_url := self._source_url(track_info, requested_url=query):
                     self.source_cache[source_url] = (expires_at, track_info)
-            while len(self.source_cache) > 256:
-                self.source_cache.pop(next(iter(self.source_cache)))
             self._expire_sources()
         return info
 
@@ -311,6 +310,8 @@ class MusicCog(commands.Cog):
         self.source_cache = {
             key: value for key, value in self.source_cache.items() if value[0] > now
         }
+        while len(self.source_cache) > 256:
+            self.source_cache.pop(next(iter(self.source_cache)))
         if self.source_cache:
             delay = min(value[0] for value in self.source_cache.values()) - now
             self.cache_expiry = get_running_loop().call_later(
@@ -319,7 +320,7 @@ class MusicCog(commands.Cog):
 
     async def refresh_stream_url(self, source_url: str) -> str | None:
         info = await self.resolve_source(source_url)
-        return self.first_track(info).get("url")
+        return self._first_track(info).get("url")
 
     def stream_valid_until(self, stream_url: str) -> float:
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]
@@ -330,12 +331,12 @@ class MusicCog(commands.Cog):
         return expires_at - 60
 
     @staticmethod
-    def is_url(query: str) -> bool:
+    def _is_url(query: str) -> bool:
         parsed = urlparse(query.strip())
         return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
     @staticmethod
-    def first_track(info: dict) -> dict:
+    def _first_track(info: dict) -> dict:
         if "entries" not in info:
             return info
         if not (
@@ -345,7 +346,7 @@ class MusicCog(commands.Cog):
         return track
 
     @staticmethod
-    def source_url(track_info: dict, requested_url: str | None = None) -> str | None:
+    def _source_url(track_info: dict, requested_url: str | None = None) -> str | None:
         if webpage_url := track_info.get("webpage_url"):
             return webpage_url
         if original_url := track_info.get("original_url"):
@@ -355,13 +356,13 @@ class MusicCog(commands.Cog):
             "YoutubeSearch",
         } and track_info.get("id"):
             return f"https://www.youtube.com/watch?v={track_info['id']}"
-        if requested_url and MusicCog.is_url(requested_url):
+        if requested_url and MusicCog._is_url(requested_url):
             return requested_url.strip()
         url = track_info.get("url")
         return url if isinstance(url, str) else None
 
     @staticmethod
-    def format_duration(value) -> str:
+    def _format_duration(value) -> str:
         if not isinstance(value, (int, float)):
             return "N/A"
         minutes, seconds = divmod(int(value), 60)
@@ -375,13 +376,13 @@ class MusicCog(commands.Cog):
     def queue_item(
         self, track_info: dict, requested_url: str | None = None
     ) -> QueueItem:
-        if not (source_url := self.source_url(track_info, requested_url)):
+        if not (source_url := self._source_url(track_info, requested_url)):
             raise ValueError("No source URL found.")
         return QueueItem(
             source_url=source_url,
             title=track_info.get("title", "Unknown Title"),
             duration=track_info.get("duration_string")
-            or self.format_duration(track_info.get("duration")),
+            or self._format_duration(track_info.get("duration")),
             stream_url=track_info.get("url"),
             refresh_stream=self.refresh_stream_url,
         )
@@ -397,7 +398,7 @@ class MusicCog(commands.Cog):
                 continue
         return items
 
-    async def cog_unload(self):
+    def cog_unload(self) -> None:
         # In-flight lookups and queued tracks must not refill an unloaded cache.
         self.cache_enabled = False
         self.source_cache.clear()
