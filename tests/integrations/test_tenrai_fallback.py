@@ -1,7 +1,8 @@
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import ClientError
@@ -12,9 +13,10 @@ from extensions.integrations import _tenrai_fallback as tenrai
 
 
 class DummyResponse:
-    def __init__(self, payload=None, *, status=200, json_error=None):
+    def __init__(self, payload=None, *, status=200, headers=None, json_error=None):
         self.payload = payload
         self.status = status
+        self.headers = headers or {}
         self.json_error = json_error
 
     async def __aenter__(self):
@@ -27,6 +29,78 @@ class DummyResponse:
         if self.json_error is not None:
             raise self.json_error
         return self.payload
+
+
+@pytest.mark.asyncio
+async def test_weekly_schedule_paginates_and_normalizes_broadcast_times():
+    monday = {
+        "title": "Weekly Anime",
+        "title_english": "Weekly Anime",
+        "title_japanese": "週間アニメ",
+        "broadcast": {
+            "day": "Mondays",
+            "time": "22:00",
+            "timezone": "Asia/Tokyo",
+        },
+    }
+    unknown = {
+        "title": "TBA Anime",
+        "broadcast": {"day": None, "time": None, "timezone": None},
+    }
+    session = SimpleNamespace(
+        get=MagicMock(
+            side_effect=[
+                DummyResponse(
+                    {
+                        "pagination": {"has_next_page": True},
+                        "data": [monday],
+                    }
+                ),
+                DummyResponse(
+                    {
+                        "pagination": {"has_next_page": False},
+                        "data": [unknown],
+                    }
+                ),
+            ]
+        )
+    )
+    week_start = int(datetime(2026, 9, 7, tzinfo=UTC).timestamp())
+    week_end = int(datetime(2026, 9, 14, tzinfo=UTC).timestamp())
+    results = await tenrai.weekly_schedule(session, week_start, week_end)
+
+    assert [result["airingAt"] for result in results] == [
+        int(datetime(2026, 9, 7, 13, tzinfo=UTC).timestamp()),
+        None,
+    ]
+    assert results[0]["media"]["title"] == {
+        "romaji": "Weekly Anime",
+        "english": "Weekly Anime",
+        "native": "週間アニメ",
+    }
+    assert results[1]["media"]["title"]["romaji"] == "TBA Anime"
+    assert all(result["_provider"] == "Tenrai" for result in results)
+    assert all(result["episode"] is None for result in results)
+    assert [call.kwargs["params"] for call in session.get.call_args_list] == [
+        {"page": "1", "limit": "50", "sfw": "true"},
+        {"page": "2", "limit": "50", "sfw": "true"},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"pagination": {}, "data": {}},
+        {"pagination": {}, "data": [None]},
+        {"data": []},
+    ],
+)
+async def test_weekly_schedule_rejects_malformed_response(payload):
+    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))
+
+    with pytest.raises(tenrai.TenraiError, match="unexpected response"):
+        await tenrai.weekly_schedule(session, 0, 604800)
 
 
 @pytest.mark.asyncio
@@ -127,12 +201,22 @@ async def test_search_media_rejects_malformed_response(payload):
 
 
 @pytest.mark.asyncio
-async def test_search_media_preserves_http_status():
-    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(status=429)))
+async def test_search_media_retries_one_rate_limit(monkeypatch):
+    session = SimpleNamespace(
+        get=MagicMock(
+            side_effect=[
+                DummyResponse(status=429, headers={"Retry-After": "2"}),
+                DummyResponse({"data": []}),
+            ]
+        )
+    )
+    wait = AsyncMock()
+    monkeypatch.setattr(tenrai, "sleep", wait)
 
-    with pytest.raises(tenrai.TenraiError, match="HTTP 429") as raised:
-        await tenrai.search_media(session, "Berserk", "MANGA", 5)
-    assert raised.value.status == 429
+    assert await tenrai.search_media(session, "Berserk", "MANGA", 5) == {
+        "data": {"Page": {"media": []}}
+    }
+    wait.assert_awaited_once_with(2)
 
 
 @pytest.mark.asyncio

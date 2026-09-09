@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -51,6 +52,15 @@ USER = {
     },
 }
 
+SCHEDULE_ENTRY = {
+    "airingAt": 1788800400,
+    "episode": 12,
+    "media": {
+        "title": {"romaji": "Weekly Anime", "english": "Weekly Anime"},
+        "isAdult": False,
+    },
+}
+
 
 def _make_cog():
     return anilist.AniListCog(SimpleNamespace(session=object(), color=0x123456))
@@ -73,7 +83,151 @@ def test_commands_are_grouped_under_anilist():
         ("manga", "anilist manga"),
         ("character", "anilist character"),
         ("user", "anilist user"),
+        ("weekly", "anilist weekly"),
     ]
+
+
+def test_week_bounds_cover_monday_through_sunday_utc():
+    assert anilist._week_bounds(datetime(2026, 9, 9, 12, 30, tzinfo=UTC)) == (
+        1788739200,
+        1789344000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
+    monkeypatch,
+):
+    adult = {
+        **SCHEDULE_ENTRY,
+        "media": {**SCHEDULE_ENTRY["media"], "isAdult": True},
+    }
+    later = {**SCHEDULE_ENTRY, "airingAt": 1788886800}
+    request = AsyncMock(
+        side_effect=[
+            {"data": {"Page": {"airingSchedules": [SCHEDULE_ENTRY] * 49 + [adult]}}},
+            {"data": {"Page": {"airingSchedules": [later]}}},
+        ]
+    )
+    monkeypatch.setattr(anilist, "_request", request)
+
+    results = await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
+
+    assert results == [SCHEDULE_ENTRY] * 49 + [later]
+    assert [call.args[2] for call in request.await_args_list] == [
+        {
+            "page": 1,
+            "perPage": 50,
+            "start": 1788739199,
+            "end": 1789344000,
+        },
+        {
+            "page": 2,
+            "perPage": 50,
+            "start": 1788739199,
+            "end": 1789344000,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_weekly_schedule_403_falls_back_to_tenrai(monkeypatch):
+    fallback = {**SCHEDULE_ENTRY, "_provider": "Tenrai", "episode": None}
+    session = object()
+    monkeypatch.setattr(
+        anilist,
+        "_request",
+        AsyncMock(side_effect=anilist.AniListError("disabled", 403)),
+    )
+    tenrai = AsyncMock(return_value=[fallback])
+    monkeypatch.setattr(anilist, "weekly_tenrai_schedule", tenrai)
+
+    assert await anilist._weekly_schedule_results(session, 1788739200, 1789344000) == [
+        fallback
+    ]
+    tenrai.assert_awaited_once_with(session, 1788739200, 1789344000)
+
+
+@pytest.mark.asyncio
+async def test_weekly_schedule_does_not_fallback_for_other_errors(monkeypatch):
+    monkeypatch.setattr(
+        anilist,
+        "_request",
+        AsyncMock(side_effect=anilist.AniListError("unavailable", 503)),
+    )
+    tenrai = AsyncMock()
+    monkeypatch.setattr(anilist, "weekly_tenrai_schedule", tenrai)
+
+    with pytest.raises(anilist.AniListError):
+        await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
+    tenrai.assert_not_awaited()
+
+
+def test_weekly_embeds_show_local_discord_times_and_degrade_to_tba():
+    tba = {**SCHEDULE_ENTRY, "airingAt": None, "episode": None}
+
+    [embed] = anilist.weekly_embeds([tba, SCHEDULE_ENTRY], 0x123456, cached=True)
+
+    assert embed.title == "Anime Airing This Week"
+    assert embed.description is not None
+    assert "<t:1788800400:F> • Episode 12" in embed.description
+    assert "**Time TBA**" in embed.description
+    assert embed.description.index("<t:1788800400:F>") < embed.description.index(
+        "**Time TBA**"
+    )
+    assert embed.author.name == "AniList • Cache Hit"
+    assert embed.footer.text == "Page 1/1 • Times shown in your timezone"
+
+
+def test_weekly_tenrai_embed_marks_broadcast_only_data():
+    fallback = {
+        **SCHEDULE_ENTRY,
+        "_provider": "Tenrai",
+        "episode": None,
+    }
+
+    [embed] = anilist.weekly_embeds([fallback], 0x123456, cached=False)
+
+    assert embed.author.name == "Tenrai"
+    assert embed.author.url == "https://tenrai.org/"
+    assert "Episode" not in (embed.description or "")
+    assert embed.footer.text == (
+        "Page 1/1 • Tenrai broadcast times • Episode numbers unavailable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_weekly_command_uses_cached_schedule(monkeypatch):
+    cog = _make_cog()
+    cog._cached_weekly_schedule = AsyncMock(return_value=([SCHEDULE_ENTRY], False))
+    monkeypatch.setattr(anilist, "_week_bounds", lambda: (1788739200, 1789344000))
+    interaction = _make_interaction()
+
+    await anilist.AniListCog.weekly.callback(cog, interaction)
+
+    interaction.response.defer.assert_awaited_once_with()
+    cog._cached_weekly_schedule.assert_awaited_once_with(1788739200, 1789344000)
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert "<t:1788800400:F>" in embed.description
+
+
+@pytest.mark.asyncio
+async def test_weekly_cache_reuses_results_within_the_same_week(monkeypatch):
+    now = [0.0]
+    schedule = AsyncMock(return_value=[SCHEDULE_ENTRY])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
+    monkeypatch.setattr(anilist, "_weekly_schedule_results", schedule)
+    cog = _make_cog()
+
+    assert await cog._cached_weekly_schedule(100, 200) == (
+        [SCHEDULE_ENTRY],
+        False,
+    )
+    assert await cog._cached_weekly_schedule(100, 200) == (
+        [SCHEDULE_ENTRY],
+        True,
+    )
+    schedule.assert_awaited_once_with(cog.bot.session, 100, 200)
 
 
 @pytest.mark.asyncio

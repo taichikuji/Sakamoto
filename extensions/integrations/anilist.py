@@ -1,5 +1,6 @@
 import logging
 from asyncio import Lock
+from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Literal
@@ -19,6 +20,7 @@ from discord.ui import Button, View, button
 # Tenrai owns fallback transport and errors; this module decides when to use it.
 from ._tenrai_fallback import TenraiError
 from ._tenrai_fallback import search_media as search_tenrai_media
+from ._tenrai_fallback import weekly_schedule as weekly_tenrai_schedule
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -46,6 +48,9 @@ CACHE_LIMIT = 256
 DESCRIPTION_LIMIT = 500
 SEARCH_RESULT_LIMIT = 5
 AUTOCOMPLETE_MIN_LENGTH = 3
+WEEKLY_CACHE_TTL_SECONDS = 60 * 60
+WEEKLY_QUERY_PAGE_SIZE = 50
+WEEKLY_PAGE_SIZE = 25
 
 MEDIA_SEARCH = """
 query ($search: String!, $type: MediaType!, $perPage: Int!) {
@@ -97,6 +102,25 @@ query ($search: String!, $perPage: Int!) {
       statistics {
         anime { count episodesWatched }
         manga { count chaptersRead }
+      }
+    }
+  }
+}
+"""
+
+WEEKLY_SCHEDULE = """
+query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
+  Page(page: $page, perPage: $perPage) {
+    airingSchedules(
+      airingAt_greater: $start
+      airingAt_lesser: $end
+      sort: TIME
+    ) {
+      airingAt
+      episode
+      media {
+        title { romaji english native }
+        isAdult
       }
     }
   }
@@ -229,6 +253,55 @@ async def _search_results(
             )
             raise error from fallback_error
     return _page_results(payload, result_field)
+
+
+async def _weekly_schedule_results(
+    session: ClientSession, week_start: int, week_end: int
+) -> list[dict[str, Any]]:
+    page = 1
+    results: list[dict[str, Any]] = []
+    try:
+        while True:
+            payload = await _request(
+                session,
+                WEEKLY_SCHEDULE,
+                {
+                    "page": page,
+                    "perPage": WEEKLY_QUERY_PAGE_SIZE,
+                    # AniList's range filters are exclusive; subtract one second to
+                    # include an airing exactly at Monday 00:00 UTC.
+                    "start": week_start - 1,
+                    "end": week_end,
+                },
+            )
+            page_results = _page_results(payload, "airingSchedules")
+            for result in page_results:
+                media = result.get("media")
+                if isinstance(media, dict) and media.get("isAdult") is not True:
+                    results.append(result)
+            if len(page_results) < WEEKLY_QUERY_PAGE_SIZE:
+                return results
+            page += 1
+    except AniListError as error:
+        if error.status != 403:
+            raise
+        logger.warning("AniList weekly schedule returned 403; using Tenrai")
+        try:
+            return await weekly_tenrai_schedule(session, week_start, week_end)
+        except TenraiError as fallback_error:
+            logger.warning(
+                "Tenrai weekly schedule fallback failed with status %s",
+                fallback_error.status,
+            )
+            raise error from fallback_error
+
+
+def _week_bounds(now: datetime | None = None) -> tuple[int, int]:
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    start = (current - timedelta(days=current.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return int(start.timestamp()), int((start + timedelta(days=7)).timestamp())
 
 
 async def search_media(
@@ -454,47 +527,83 @@ def result_embed(
     )
 
 
-class AniListPagination(View):
-    """Navigate one cached AniList result set without more API requests."""
+def _schedule_line(entry: dict[str, Any]) -> str:
+    media = entry.get("media")
+    if not isinstance(media, dict):
+        media = {}
+    title = next(iter(_result_names(media, "ANIME")), "Unknown anime")
+    display_title = title[:100].replace("\n", " ")
 
-    def __init__(
-        self,
-        results: list[dict[str, Any]],
-        search_type: SearchType,
-        color: int,
-        *,
-        cached: bool,
-        owner_id: int,
-    ) -> None:
+    airing_at = entry.get("airingAt")
+    parts = [f"<t:{airing_at}:F>"] if isinstance(airing_at, int) else ["**Time TBA**"]
+    episode = entry.get("episode")
+    if isinstance(episode, int):
+        parts.append(f"Episode {episode}")
+    parts.append(display_title)
+    return " • ".join(parts)
+
+
+def weekly_embeds(
+    entries: list[dict[str, Any]], color: int, *, cached: bool
+) -> list[Embed]:
+    """Build bounded chronological pages from one cached weekly schedule."""
+    ordered = sorted(
+        entries,
+        key=lambda entry: (
+            not isinstance(entry.get("airingAt"), int),
+            entry.get("airingAt") if isinstance(entry.get("airingAt"), int) else 0,
+            _schedule_line(entry).casefold(),
+        ),
+    )
+    lines = [_schedule_line(entry) for entry in ordered]
+    if not lines:
+        return []
+
+    descriptions = [
+        "\n".join(lines[index : index + WEEKLY_PAGE_SIZE])
+        for index in range(0, len(lines), WEEKLY_PAGE_SIZE)
+    ]
+
+    provider = "Tenrai" if entries[0].get("_provider") == "Tenrai" else "AniList"
+    author = f"{provider} • Cache Hit" if cached else provider
+    author_url = (
+        "https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/"
+    )
+    pages: list[Embed] = []
+    for index, description in enumerate(descriptions, start=1):
+        embed = Embed(
+            title="Anime Airing This Week",
+            description=description,
+            color=color,
+        )
+        embed.set_author(name=author, url=author_url)
+        detail = (
+            "Tenrai broadcast times • Episode numbers unavailable"
+            if provider == "Tenrai"
+            else "Times shown in your timezone"
+        )
+        embed.set_footer(text=f"Page {index}/{len(descriptions)} • {detail}")
+        pages.append(embed)
+    return pages
+
+
+class _OwnedPagination(View):
+    """Navigate owner-only embed pages and disable controls on timeout."""
+
+    def __init__(self, page_count: int, owner_id: int) -> None:
         super().__init__(timeout=5 * 60)
-        self.results = results
-        self.search_type = search_type
-        self.color = color
-        self.cached = cached
+        self.page_count = page_count
         self.owner_id = owner_id
         self.index = 0
         self.message: Message | None = None
         self._sync_buttons()
-
-    def current_embed(self) -> Embed:
-        embed = result_embed(
-            self.results[self.index],
-            self.search_type,
-            self.color,
-            cached=self.cached,
-        )
-        footer = embed.footer.text or ""
-        embed.set_footer(
-            text=f"Page {self.index + 1}/{len(self.results)} • {footer}"[:2048]
-        )
-        return embed
 
     def _sync_buttons(self) -> None:
         previous, following = self.children
         if isinstance(previous, Button):
             previous.disabled = self.index == 0
         if isinstance(following, Button):
-            following.disabled = self.index == len(self.results) - 1
+            following.disabled = self.index == self.page_count - 1
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user.id == self.owner_id:
@@ -527,6 +636,49 @@ class AniListPagination(View):
         await interaction.response.edit_message(embed=self.current_embed(), view=self)
 
 
+class AniListPagination(_OwnedPagination):
+    """Navigate one cached AniList result set without more API requests."""
+
+    def __init__(
+        self,
+        results: list[dict[str, Any]],
+        search_type: SearchType,
+        color: int,
+        *,
+        cached: bool,
+        owner_id: int,
+    ) -> None:
+        self.results = results
+        self.search_type = search_type
+        self.color = color
+        self.cached = cached
+        super().__init__(len(results), owner_id)
+
+    def current_embed(self) -> Embed:
+        embed = result_embed(
+            self.results[self.index],
+            self.search_type,
+            self.color,
+            cached=self.cached,
+        )
+        footer = embed.footer.text or ""
+        embed.set_footer(
+            text=f"Page {self.index + 1}/{len(self.results)} • {footer}"[:2048]
+        )
+        return embed
+
+
+class WeeklyPagination(_OwnedPagination):
+    """Navigate prebuilt weekly schedule embeds without more API requests."""
+
+    def __init__(self, pages: list[Embed], owner_id: int) -> None:
+        self.pages = pages
+        super().__init__(len(pages), owner_id)
+
+    def current_embed(self) -> Embed:
+        return self.pages[self.index]
+
+
 class AniListCog(
     commands.GroupCog,
     group_name="anilist",
@@ -541,6 +693,8 @@ class AniListCog(
         ] = {}
         self.search_lock = Lock()
         self.autocomplete_lock = Lock()
+        self.weekly_cache: tuple[int, float, list[dict[str, Any]]] | None = None
+        self.weekly_lock = Lock()
 
     def _store_cache(
         self,
@@ -577,6 +731,31 @@ class AniListCog(
             result = await _search_results(self.bot.session, query, search_type)
             self._store_cache(key, result)
             return result, False
+
+    async def _cached_weekly_schedule(
+        self, week_start: int, week_end: int
+    ) -> tuple[list[dict[str, Any]], bool]:
+        cached = self.weekly_cache
+        if cached is not None and cached[0] == week_start and cached[1] > monotonic():
+            return cached[2], True
+
+        async with self.weekly_lock:
+            cached = self.weekly_cache
+            if (
+                cached is not None
+                and cached[0] == week_start
+                and cached[1] > monotonic()
+            ):
+                return cached[2], True
+            results = await _weekly_schedule_results(
+                self.bot.session, week_start, week_end
+            )
+            self.weekly_cache = (
+                week_start,
+                monotonic() + WEEKLY_CACHE_TTL_SECONDS,
+                results,
+            )
+            return results, False
 
     async def search_query_autocomplete(
         self, interaction: Interaction, current: str
@@ -686,6 +865,48 @@ class AniListCog(
     @app_commands.autocomplete(query=search_query_autocomplete)
     async def user(self, interaction: Interaction, query: str) -> None:
         await self._search_command(interaction, query, "USER")
+
+    @app_commands.command(
+        name="weekly", description="Show anime airing during the current week."
+    )
+    async def weekly(self, interaction: Interaction) -> None:
+        if self.bot.session is None:
+            await interaction.response.send_message(
+                ":x: The bot's HTTP session is not ready. Please try again later.",
+                ephemeral=True,
+            )
+            return
+
+        week_start, week_end = _week_bounds()
+        await interaction.response.defer()
+        try:
+            entries, cached = await self._cached_weekly_schedule(week_start, week_end)
+        except AniListError as error:
+            logger.warning(
+                "AniList weekly schedule failed with status %s", error.status
+            )
+            message = (
+                ":x: AniList has temporarily disabled its API. Please try again later."
+                if error.status == 403
+                else ":x: AniList is unavailable. Please try again later."
+            )
+            await interaction.followup.send(message, ephemeral=True)
+            return
+
+        pages = weekly_embeds(entries, self.bot.color, cached=cached)
+        if not pages:
+            await interaction.followup.send(
+                ":mag: No anime are scheduled to air this week.", ephemeral=True
+            )
+            return
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0])
+            return
+
+        view = WeeklyPagination(pages, interaction.user.id)
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view, wait=True
+        )
 
     async def _search_command(
         self, interaction: Interaction, query: str, search_type: SearchType
