@@ -8,7 +8,6 @@ dist/
 .ruff_cache/
 .env
 config.py
-extensions/integrations/_anilist_test_headers.py
 data/*.sqlite*
 functions_preview/
 .vscode/

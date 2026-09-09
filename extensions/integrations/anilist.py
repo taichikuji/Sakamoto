@@ -16,20 +16,14 @@ from discord import (
 from discord.ext import commands
 from discord.ui import Button, View, button
 
-try:
-    from ._anilist_test_headers import HEADERS as LOCAL_TEST_HEADERS
-except ModuleNotFoundError:
-    LOCAL_TEST_HEADERS = None
+# Tenrai owns fallback transport and errors; this module decides when to use it.
+from ._tenrai_fallback import TenraiError
+from ._tenrai_fallback import search_media as search_tenrai_media
 
 if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
-
-if LOCAL_TEST_HEADERS:
-    logger.warning(
-        "Using local AniList test headers; do not deploy this configuration."
-    )
 
 ANILIST_URL = "https://graphql.anilist.co"
 MediaType = Literal["ANIME", "MANGA"]
@@ -171,7 +165,6 @@ async def _request(
         async with session.post(
             ANILIST_URL,
             json={"query": query, "variables": variables},
-            headers=LOCAL_TEST_HEADERS,
             timeout=ClientTimeout(total=10),
         ) as response:
             if not 200 <= response.status < 300:
@@ -217,7 +210,25 @@ async def _search_results(
     else:
         document, result_field = MEDIA_SEARCH, "media"
         variables["type"] = search_type
-    return _page_results(await _request(session, document, variables), result_field)
+    try:
+        payload = await _request(session, document, variables)
+    except AniListError as error:
+        if error.status != 403 or search_type not in ("ANIME", "MANGA"):
+            raise
+        # This AniList search boundary owns the media-only, 403-only handoff.
+        logger.warning(
+            "AniList %s search returned 403; using Tenrai", search_type.lower()
+        )
+        try:
+            payload = await search_tenrai_media(session, query, search_type, limit)
+        except TenraiError as fallback_error:
+            logger.warning(
+                "Tenrai %s fallback failed with status %s",
+                search_type.lower(),
+                fallback_error.status,
+            )
+            raise error from fallback_error
+    return _page_results(payload, result_field)
 
 
 async def search_media(
@@ -325,8 +336,13 @@ def media_embed(
     banner_url = media.get("bannerImage")
     if isinstance(banner_url, str):
         embed.set_image(url=banner_url)
-    author = "AniList • Cache Hit" if cached else "AniList"
-    embed.set_author(name=author, url="https://anilist.co/")
+    # The normalized provider marker controls attribution in the shared embed.
+    provider = "Tenrai" if media.get("_provider") == "Tenrai" else "AniList"
+    author = f"{provider} • Cache Hit" if cached else provider
+    embed.set_author(
+        name=author,
+        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    )
     return embed
 
 

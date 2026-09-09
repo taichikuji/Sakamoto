@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from extensions.integrations import _tenrai_fallback as tenrai_fallback
 from extensions.integrations import anilist
 
 MANGA = {
@@ -118,6 +119,60 @@ async def test_search_results_selects_document_variables_and_collection(
 
     assert await anilist._search_results(session, "Berserk", search_type, 3) == [result]
     request.assert_awaited_once_with(session, document, variables)
+
+
+@pytest.mark.asyncio
+async def test_anilist_403_falls_back_to_tenrai_and_caches_result(monkeypatch):
+    fallback = {**MANGA, "_provider": "Tenrai"}
+    request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
+    tenrai = AsyncMock(return_value={"data": {"Page": {"media": [fallback]}}})
+    monkeypatch.setattr(anilist, "_request", request)
+    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai)
+    cog = _make_cog()
+
+    assert await cog._cached_search("Berserk", "MANGA") == ([fallback], False)
+    assert await cog._cached_search(" berserk ", "MANGA") == ([fallback], True)
+    request.assert_awaited_once()
+    tenrai.assert_awaited_once_with(cog.bot.session, "Berserk", "MANGA", 5)
+    embed = anilist.media_embed(fallback, "MANGA", 0x123456, cached=True)
+    assert embed.author.name == "Tenrai • Cache Hit"
+    assert embed.author.url == "https://tenrai.org/"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_type", "status"),
+    [("ANIME", 503), ("CHARACTER", 403)],
+)
+async def test_tenrai_fallback_is_limited_to_media_403(
+    monkeypatch, search_type, status
+):
+    monkeypatch.setattr(
+        anilist,
+        "_request",
+        AsyncMock(side_effect=anilist.AniListError("unavailable", status)),
+    )
+    tenrai = AsyncMock()
+    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai)
+
+    with pytest.raises(anilist.AniListError):
+        await anilist._search_results(object(), "Berserk", search_type)
+    tenrai.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_tenrai_fallback_preserves_anilist_error(monkeypatch):
+    original = anilist.AniListError("disabled", 403)
+    monkeypatch.setattr(anilist, "_request", AsyncMock(side_effect=original))
+    monkeypatch.setattr(
+        anilist,
+        "search_tenrai_media",
+        AsyncMock(side_effect=tenrai_fallback.TenraiError("unavailable", 503)),
+    )
+
+    with pytest.raises(anilist.AniListError) as raised:
+        await anilist._search_results(object(), "Berserk", "MANGA")
+    assert raised.value is original
 
 
 @pytest.mark.asyncio
