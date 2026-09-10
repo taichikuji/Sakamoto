@@ -29,6 +29,28 @@ MANGA = {
     "genres": ["Action", "Drama", "Fantasy"],
 }
 
+ANIME = {
+    **MANGA,
+    "title": {"romaji": "Cowboy Bebop", "english": "Cowboy Bebop"},
+    "siteUrl": "https://anilist.co/anime/1",
+    "format": "TV",
+    "episodes": 26,
+}
+
+TENRAI_ANIME = {
+    "title": "Cowboy Bebop",
+    "title_english": "Cowboy Bebop",
+    "title_japanese": "カウボーイビバップ",
+    "url": "https://myanimelist.net/anime/1/Cowboy_Bebop",
+    "synopsis": "Bounty hunters travel through space.",
+    "images": {"jpg": {"large_image_url": "https://example.test/bebop.jpg"}},
+    "type": "TV",
+    "status": "Finished Airing",
+    "episodes": 26,
+    "score": 8.9,
+    "genres": [{"name": "Action"}, {"name": "Sci-Fi"}],
+}
+
 CHARACTER = {
     "name": {"full": "Monkey D. Luffy", "native": "モンキー・D・ルフィ"},
     "siteUrl": "https://anilist.co/character/40",
@@ -83,8 +105,219 @@ def test_commands_are_grouped_under_anilist():
         ("manga", "anilist manga"),
         ("character", "anilist character"),
         ("user", "anilist user"),
+        ("top", "anilist top"),
         ("weekly", "anilist weekly"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_top_results_uses_anilist_filters_and_score_order(monkeypatch):
+    request = AsyncMock(return_value={"data": {"Page": {"media": [ANIME]}}})
+    monkeypatch.setattr(anilist, "_request", request)
+    session = object()
+
+    assert await anilist._top_results(
+        session,
+        "ANIME",
+        year=1998,
+        genre="Action",
+        season="SPRING",
+        media_format="TV",
+    ) == [ANIME]
+    request.assert_awaited_once_with(
+        session,
+        anilist.TOP_MEDIA,
+        {
+            "type": "ANIME",
+            "perPage": anilist.TOP_RESULT_LIMIT,
+            "yearStart": 19979999,
+            "yearEnd": 19990000,
+            "genre": "Action",
+            "season": "SPRING",
+            "format": "TV",
+        },
+    )
+    assert "isAdult: false" in anilist.TOP_MEDIA
+    assert "sort: [SCORE_DESC]" in anilist.TOP_MEDIA
+
+
+@pytest.mark.asyncio
+async def test_tenrai_top_translates_filters_and_media_in_one_request(monkeypatch):
+    request = AsyncMock(return_value={"data": [TENRAI_ANIME]})
+    monkeypatch.setattr(tenrai_fallback, "_request", request)
+    session = object()
+
+    payload = await tenrai_fallback.top_media(
+        session,
+        "ANIME",
+        10,
+        year=1998,
+        genre="Thriller",
+        season="SPRING",
+        media_format="TV",
+    )
+
+    request.assert_awaited_once_with(
+        session,
+        "anime",
+        {
+            "limit": "10",
+            "sfw": "true",
+            "order_by": "score",
+            "sort": "desc",
+            "genres": "41",
+            "type": "tv",
+            "start_date": "1998-04-01",
+            "end_date": "1998-06-30",
+        },
+    )
+    [result] = payload["data"]["Page"]["media"]
+    assert result["_provider"] == "Tenrai"
+    assert result["title"] == {
+        "romaji": "Cowboy Bebop",
+        "english": "Cowboy Bebop",
+        "native": "カウボーイビバップ",
+    }
+    assert result["averageScore"] == 89
+    assert result["genres"] == ["Action", "Sci-Fi"]
+
+
+@pytest.mark.asyncio
+async def test_top_403_uses_one_tenrai_request_per_uncached_filter_set(monkeypatch):
+    fallback = {**ANIME, "_provider": "Tenrai"}
+    request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
+    tenrai = AsyncMock(return_value={"data": {"Page": {"media": [fallback]}}})
+    monkeypatch.setattr(anilist, "_request", request)
+    monkeypatch.setattr(anilist, "top_tenrai_media", tenrai)
+    cog = _make_cog()
+
+    assert await cog._cached_top("ANIME") == ([fallback], False)
+    assert await cog._cached_top("ANIME") == ([fallback], True)
+    assert await cog._cached_top("ANIME", year=1998) == ([fallback], False)
+
+    assert request.await_count == 2
+    assert tenrai.await_count == 2
+    assert (
+        anilist.media_embed(fallback, "ANIME", 0x123456, cached=True).author.name
+        == "Tenrai • Cache Hit"
+    )
+
+
+@pytest.mark.asyncio
+async def test_top_403_preserves_anilist_error_when_tenrai_fails(monkeypatch):
+    original = anilist.AniListError("disabled", 403)
+    monkeypatch.setattr(anilist, "_request", AsyncMock(side_effect=original))
+    monkeypatch.setattr(
+        anilist,
+        "top_tenrai_media",
+        AsyncMock(side_effect=tenrai_fallback.TenraiError("unavailable", 503)),
+    )
+
+    with pytest.raises(anilist.AniListError) as raised:
+        await _make_cog()._cached_top("ANIME")
+    assert raised.value is original
+
+
+@pytest.mark.asyncio
+async def test_top_season_without_year_uses_current_year(monkeypatch):
+    ranking = AsyncMock(return_value=[ANIME])
+    monkeypatch.setattr(anilist, "_top_results", ranking)
+    cog = _make_cog()
+
+    await cog._cached_top("ANIME", season="FALL")
+
+    ranking.assert_awaited_once_with(
+        cog.bot.session,
+        "ANIME",
+        year=datetime.now(UTC).year,
+        genre=None,
+        season="FALL",
+        media_format=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_top_cache_normalizes_equivalent_genres(monkeypatch):
+    ranking = AsyncMock(return_value=[ANIME])
+    monkeypatch.setattr(anilist, "_top_results", ranking)
+    cog = _make_cog()
+
+    assert await cog._cached_top("ANIME", genre="Action") == ([ANIME], False)
+    assert await cog._cached_top("ANIME", genre="  action  ") == ([ANIME], True)
+    ranking.assert_awaited_once_with(
+        cog.bot.session,
+        "ANIME",
+        year=None,
+        genre="Action",
+        season=None,
+        media_format=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_top_command_defaults_to_anime_and_paginates_cached_results():
+    second = {
+        **ANIME,
+        "title": {"romaji": "Frieren: Beyond Journey's End"},
+        "siteUrl": "https://anilist.co/anime/154587",
+    }
+    cog = _make_cog()
+    cog._cached_top = AsyncMock(return_value=([ANIME, second], True))
+    interaction = _make_interaction()
+    message = SimpleNamespace(edit=AsyncMock())
+    interaction.followup.send.return_value = message
+
+    await anilist.AniListCog.top.callback(cog, interaction)
+
+    cog._cached_top.assert_awaited_once_with(
+        "ANIME",
+        year=None,
+        genre=None,
+        season=None,
+        media_format=None,
+    )
+    sent = interaction.followup.send.await_args.kwargs
+    view = sent["view"]
+    assert isinstance(view, anilist.AniListPagination)
+    assert sent["embed"].title == "Cowboy Bebop"
+    assert sent["embed"].footer.text.startswith("Rank 1/2 • ")
+    assert sent["embed"].author.name == "AniList • Cache Hit"
+
+    navigation = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
+    await view.children[1].callback(navigation)
+
+    assert navigation.response.edit_message.await_args.kwargs[
+        "embed"
+    ].footer.text.startswith("Rank 2/2 • ")
+    cog._cached_top.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_top_command_passes_selected_filters():
+    cog = _make_cog()
+    cog._cached_top = AsyncMock(return_value=([MANGA], False))
+    interaction = _make_interaction()
+
+    await anilist.AniListCog.top.callback(
+        cog,
+        interaction,
+        media_type="MANGA",
+        year=1989,
+        genre="Action",
+        season=None,
+        format="MANGA",
+    )
+
+    cog._cached_top.assert_awaited_once_with(
+        "MANGA",
+        year=1989,
+        genre="Action",
+        season=None,
+        media_format="MANGA",
+    )
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert embed.title == "Berserk"
+    assert embed.footer.text.startswith("Rank 1/1 • ")
 
 
 def test_week_bounds_cover_monday_through_sunday_utc():

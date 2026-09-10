@@ -23,6 +23,43 @@ _WEEKDAYS = {
     "saturday": 5,
     "sunday": 6,
 }
+_GENRE_IDS = {
+    "action": 1,
+    "adventure": 2,
+    "comedy": 4,
+    "drama": 8,
+    "ecchi": 9,
+    "fantasy": 10,
+    "horror": 14,
+    "mahou shoujo": 66,
+    "mecha": 18,
+    "music": 19,
+    "mystery": 7,
+    "psychological": 40,
+    "romance": 22,
+    "sci-fi": 24,
+    "slice of life": 36,
+    "sports": 30,
+    "supernatural": 37,
+    "thriller": 41,
+}
+_MEDIA_FORMATS = {
+    "ANIME": {
+        "TV": "tv",
+        "MOVIE": "movie",
+        "SPECIAL": "special",
+        "OVA": "ova",
+        "ONA": "ona",
+        "MUSIC": "music",
+    },
+    "MANGA": {"MANGA": "manga", "NOVEL": "lightnovel", "ONE_SHOT": "oneshot"},
+}
+_SEASON_DATES = {
+    "WINTER": ("01-01", "03-31"),
+    "SPRING": ("04-01", "06-30"),
+    "SUMMER": ("07-01", "09-30"),
+    "FALL": ("10-01", "12-31"),
+}
 
 
 class TenraiError(Exception):
@@ -61,6 +98,41 @@ def _titles(item: dict[str, Any]) -> dict[str, Any]:
         "english": item.get("title_english"),
         "native": item.get("title_japanese"),
     }
+
+
+def _media_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai media records into the shared AniList Page shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        try:
+            raw_score = float(item["score"])
+            score = round(raw_score * 10) if 0 < raw_score <= 10 else None
+        except KeyError, TypeError, ValueError:
+            score = None
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "title": _titles(item),
+                "siteUrl": item.get("url"),
+                "description": item.get("synopsis"),
+                "coverImage": _cover_image(item),
+                "bannerImage": None,
+                "format": item.get("type"),
+                "status": item.get("status"),
+                "episodes": item.get("episodes"),
+                "chapters": item.get("chapters"),
+                "volumes": item.get("volumes"),
+                "averageScore": score,
+                "genres": _genre_names(item),
+            }
+        )
+    return {"data": {"Page": {"media": results}}}
 
 
 async def _request(
@@ -180,34 +252,46 @@ async def search_media(
         session, resource, {"q": query, "limit": str(limit), "sfw": "true"}
     )
 
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise TenraiError("Tenrai returned an unexpected response.")
+    return _media_page(payload)
 
-    results: list[dict[str, Any]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise TenraiError("Tenrai returned an unexpected response.")
-        try:
-            raw_score = float(item["score"])
-            score = round(raw_score * 10) if 0 < raw_score <= 10 else None
-        except KeyError, TypeError, ValueError:
-            score = None
-        results.append(
-            {
-                "_provider": "Tenrai",
-                "title": _titles(item),
-                "siteUrl": item.get("url"),
-                "description": item.get("synopsis"),
-                "coverImage": _cover_image(item),
-                "bannerImage": None,
-                "format": item.get("type"),
-                "status": item.get("status"),
-                "episodes": item.get("episodes"),
-                "chapters": item.get("chapters"),
-                "volumes": item.get("volumes"),
-                "averageScore": score,
-                "genres": _genre_names(item),
-            }
-        )
-    return {"data": {"Page": {"media": results}}}
+
+async def top_media(
+    session: ClientSession,
+    media_type: MediaType,
+    limit: int,
+    *,
+    year: int | None = None,
+    genre: str | None = None,
+    season: str | None = None,
+    media_format: str | None = None,
+) -> dict[str, Any]:
+    """Return one filtered Tenrai score ranking in the shared Page shape."""
+    params = {
+        "limit": str(limit),
+        "sfw": "true",
+        "order_by": "score",
+        "sort": "desc",
+    }
+
+    if genre is not None:
+        genre_id = _GENRE_IDS.get(genre.casefold())
+        if genre_id is None:
+            return {"data": {"Page": {"media": []}}}
+        params["genres"] = str(genre_id)
+
+    if media_format is not None:
+        tenrai_format = _MEDIA_FORMATS[media_type].get(media_format)
+        if tenrai_format is None:
+            return {"data": {"Page": {"media": []}}}
+        params["type"] = tenrai_format
+
+    if season is not None:
+        if year is None or (dates := _SEASON_DATES.get(season)) is None:
+            return {"data": {"Page": {"media": []}}}
+        params["start_date"] = f"{year}-{dates[0]}"
+        params["end_date"] = f"{year}-{dates[1]}"
+    elif year is not None:
+        params["start_date"] = f"{year}-01-01"
+        params["end_date"] = f"{year}-12-31"
+
+    return _media_page(await _request(session, media_type.lower(), params))

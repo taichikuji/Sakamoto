@@ -20,6 +20,7 @@ from discord.ui import Button, View, button
 # Tenrai owns fallback transport and errors; this module decides when to use it.
 from ._tenrai_fallback import TenraiError
 from ._tenrai_fallback import search_media as search_tenrai_media
+from ._tenrai_fallback import top_media as top_tenrai_media
 from ._tenrai_fallback import weekly_schedule as weekly_tenrai_schedule
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 CACHE_LIMIT = 256
 DESCRIPTION_LIMIT = 500
 SEARCH_RESULT_LIMIT = 5
+TOP_RESULT_LIMIT = 10
 AUTOCOMPLETE_MIN_LENGTH = 3
 WEEKLY_CACHE_TTL_SECONDS = 60 * 60
 WEEKLY_QUERY_PAGE_SIZE = 50
@@ -122,6 +124,44 @@ query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
         title { romaji english native }
         isAdult
       }
+    }
+  }
+}
+"""
+
+TOP_MEDIA = """
+query (
+  $type: MediaType!
+  $perPage: Int!
+  $yearStart: FuzzyDateInt
+  $yearEnd: FuzzyDateInt
+  $genre: String
+  $season: MediaSeason
+  $format: MediaFormat
+) {
+  Page(page: 1, perPage: $perPage) {
+    media(
+      type: $type
+      startDate_greater: $yearStart
+      startDate_lesser: $yearEnd
+      genre: $genre
+      season: $season
+      format: $format
+      isAdult: false
+      sort: [SCORE_DESC]
+    ) {
+      title { romaji english native }
+      siteUrl
+      description(asHtml: false)
+      coverImage { large }
+      bannerImage
+      format
+      status
+      episodes
+      chapters
+      volumes
+      averageScore
+      genres
     }
   }
 }
@@ -294,6 +334,27 @@ async def _weekly_schedule_results(
                 fallback_error.status,
             )
             raise error from fallback_error
+
+
+async def _top_results(
+    session: ClientSession,
+    media_type: MediaType,
+    *,
+    year: int | None = None,
+    genre: str | None = None,
+    season: str | None = None,
+    media_format: str | None = None,
+) -> list[dict[str, Any]]:
+    variables = {
+        "type": media_type,
+        "perPage": TOP_RESULT_LIMIT,
+        "yearStart": year * 10000 - 1 if year is not None else None,
+        "yearEnd": (year + 1) * 10000 if year is not None else None,
+        "genre": genre,
+        "season": season,
+        "format": media_format,
+    }
+    return _page_results(await _request(session, TOP_MEDIA, variables), "media")
 
 
 def _week_bounds(now: datetime | None = None) -> tuple[int, int]:
@@ -647,11 +708,13 @@ class AniListPagination(_OwnedPagination):
         *,
         cached: bool,
         owner_id: int,
+        page_label: str = "Page",
     ) -> None:
         self.results = results
         self.search_type = search_type
         self.color = color
         self.cached = cached
+        self.page_label = page_label
         super().__init__(len(results), owner_id)
 
     def current_embed(self) -> Embed:
@@ -663,7 +726,9 @@ class AniListPagination(_OwnedPagination):
         )
         footer = embed.footer.text or ""
         embed.set_footer(
-            text=f"Page {self.index + 1}/{len(self.results)} • {footer}"[:2048]
+            text=(f"{self.page_label} {self.index + 1}/{len(self.results)} • {footer}")[
+                :2048
+            ]
         )
         return embed
 
@@ -689,7 +754,7 @@ class AniListCog(
     def __init__(self, bot: Sakamoto) -> None:
         self.bot = bot
         self.search_cache: dict[
-            tuple[SearchType, str], tuple[float, list[dict[str, Any]]]
+            tuple[str, str], tuple[float, list[dict[str, Any]]]
         ] = {}
         self.search_lock = Lock()
         self.autocomplete_lock = Lock()
@@ -698,7 +763,7 @@ class AniListCog(
 
     def _store_cache(
         self,
-        key: tuple[SearchType, str],
+        key: tuple[str, str],
         results: list[dict[str, Any]],
         *,
         expires_at: float | None = None,
@@ -755,6 +820,57 @@ class AniListCog(
                 monotonic() + WEEKLY_CACHE_TTL_SECONDS,
                 results,
             )
+            return results, False
+
+    async def _cached_top(
+        self,
+        media_type: MediaType,
+        *,
+        year: int | None = None,
+        genre: str | None = None,
+        season: str | None = None,
+        media_format: str | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        genre = " ".join(genre.split()) if genre else None
+        if season is not None and year is None:
+            year = datetime.now(UTC).year
+        filters = (year, genre.casefold() if genre else None, season, media_format)
+        key = (f"TOP_{media_type}", repr(filters))
+        if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
+            return cached[1], True
+
+        async with self.search_lock:
+            if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
+                return cached[1], True
+            fallback_args = {
+                "year": year,
+                "genre": genre,
+                "season": season,
+                "media_format": media_format,
+            }
+            try:
+                results = await _top_results(
+                    self.bot.session, media_type, **fallback_args
+                )
+            except AniListError as error:
+                if error.status != 403:
+                    raise
+                logger.warning("AniList top ranking returned 403; using Tenrai")
+                try:
+                    payload = await top_tenrai_media(
+                        self.bot.session,
+                        media_type,
+                        TOP_RESULT_LIMIT,
+                        **fallback_args,
+                    )
+                    results = _page_results(payload, "media")
+                except TenraiError as fallback_error:
+                    logger.warning(
+                        "Tenrai top ranking fallback failed with status %s",
+                        fallback_error.status,
+                    )
+                    raise error from fallback_error
+            self._store_cache(key, results)
             return results, False
 
     async def search_query_autocomplete(
@@ -865,6 +981,126 @@ class AniListCog(
     @app_commands.autocomplete(query=search_query_autocomplete)
     async def user(self, interaction: Interaction, query: str) -> None:
         await self._search_command(interaction, query, "USER")
+
+    @app_commands.command(
+        name="top", description="Browse top-ranked anime or manga on AniList."
+    )
+    @app_commands.describe(
+        media_type="The kind of media to rank (defaults to Anime).",
+        year="Only include titles from this year.",
+        genre="Only include titles in this genre.",
+        season="Only include titles from this anime season.",
+        format="Only include titles in this release format.",
+    )
+    @app_commands.choices(
+        media_type=[
+            app_commands.Choice(name="Anime", value="ANIME"),
+            app_commands.Choice(name="Manga", value="MANGA"),
+        ],
+        genre=[
+            app_commands.Choice(name=value, value=value)
+            for value in (
+                "Action",
+                "Adventure",
+                "Comedy",
+                "Drama",
+                "Ecchi",
+                "Fantasy",
+                "Horror",
+                "Mahou Shoujo",
+                "Mecha",
+                "Music",
+                "Mystery",
+                "Psychological",
+                "Romance",
+                "Sci-Fi",
+                "Slice of Life",
+                "Sports",
+                "Supernatural",
+                "Thriller",
+            )
+        ],
+        season=[
+            app_commands.Choice(name=value.title(), value=value)
+            for value in ("WINTER", "SPRING", "SUMMER", "FALL")
+        ],
+        format=[
+            app_commands.Choice(name=_label(value), value=value)
+            for value in (
+                "TV",
+                "TV_SHORT",
+                "MOVIE",
+                "SPECIAL",
+                "OVA",
+                "ONA",
+                "MUSIC",
+                "MANGA",
+                "NOVEL",
+                "ONE_SHOT",
+            )
+        ],
+    )
+    async def top(
+        self,
+        interaction: Interaction,
+        media_type: str = "ANIME",
+        year: app_commands.Range[int, 1900, 2100] | None = None,
+        genre: str | None = None,
+        season: str | None = None,
+        format: str | None = None,
+    ) -> None:
+        if self.bot.session is None:
+            await interaction.response.send_message(
+                ":x: The bot's HTTP session is not ready. Please try again later.",
+                ephemeral=True,
+            )
+            return
+
+        selected_type: MediaType = "MANGA" if media_type == "MANGA" else "ANIME"
+        await interaction.response.defer()
+        try:
+            results, cached = await self._cached_top(
+                selected_type,
+                year=year,
+                genre=genre,
+                season=season,
+                media_format=format,
+            )
+        except AniListError as error:
+            logger.warning("AniList top ranking failed with status %s", error.status)
+            message = (
+                ":x: AniList has temporarily disabled its API. Please try again later."
+                if error.status == 403
+                else ":x: AniList is unavailable. Please try again later."
+            )
+            await interaction.followup.send(message, ephemeral=True)
+            return
+
+        if not results:
+            await interaction.followup.send(
+                f":mag: No {selected_type.lower()} found with those filters.",
+                ephemeral=True,
+            )
+            return
+        if len(results) == 1:
+            embed = media_embed(
+                results[0], selected_type, self.bot.color, cached=cached
+            )
+            embed.set_footer(text=f"Rank 1/1 • {embed.footer.text or ''}"[:2048])
+            await interaction.followup.send(embed=embed)
+            return
+
+        view = AniListPagination(
+            results,
+            selected_type,
+            self.bot.color,
+            cached=cached,
+            owner_id=interaction.user.id,
+            page_label="Rank",
+        )
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view, wait=True
+        )
 
     @app_commands.command(
         name="weekly", description="Show anime airing during the current week."
