@@ -173,6 +173,77 @@ async def test_search_media_normalizes_tenrai_records(media_type, resource, coun
 
 
 @pytest.mark.asyncio
+async def test_search_characters_normalizes_tenrai_records():
+    item = {
+        "mal_id": 40,
+        "url": "https://myanimelist.net/character/40/Luffy_Monkey_D_",
+        "images": {
+            "jpg": {"image_url": "https://example.test/luffy.jpg"},
+        },
+        "name": "Monkey D., Luffy",
+        "name_kanji": "モンキー・D・ルフィ",
+        "favorites": 149815,
+        "about": "Captain of the Straw Hats.\n\n[Spoiler]Secret.[/Spoiler]",
+    }
+    session = SimpleNamespace(
+        get=MagicMock(return_value=DummyResponse({"data": [item]}))
+    )
+
+    payload = await tenrai.search_characters(session, "Luffy", 5)
+
+    assert payload == {
+        "data": {
+            "Page": {
+                "characters": [
+                    {
+                        "_provider": "Tenrai",
+                        "name": {
+                            "full": "Monkey D., Luffy",
+                            "native": "モンキー・D・ルフィ",
+                        },
+                        "siteUrl": (
+                            "https://myanimelist.net/character/40/Luffy_Monkey_D_"
+                        ),
+                        "description": "Captain of the Straw Hats.\n\n~!Secret.!~",
+                        "image": {"large": "https://example.test/luffy.jpg"},
+                        "gender": None,
+                        "age": None,
+                        "favourites": 149815,
+                    }
+                ]
+            }
+        }
+    }
+    request = session.get.call_args
+    assert request.args == (f"{tenrai.TENRAI_URL}/characters",)
+    assert request.kwargs["params"] == {"q": "Luffy", "limit": "5"}
+    assert request.kwargs["timeout"].total == 10
+
+
+@pytest.mark.asyncio
+async def test_search_characters_tolerates_missing_optional_data():
+    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse({"data": [{}]})))
+
+    payload = await tenrai.search_characters(session, "Unknown", 5)
+    [result] = payload["data"]["Page"]["characters"]
+
+    assert result["image"] is None
+    assert result["description"] is None
+    assert result["favourites"] is None
+    assert result["gender"] is None
+    assert result["age"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [{"data": {}}, {"data": [None]}, None])
+async def test_search_characters_rejects_malformed_response(payload):
+    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))
+
+    with pytest.raises(tenrai.TenraiError, match="unexpected response"):
+        await tenrai.search_characters(session, "Luffy", 5)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("score", [0, None, "unknown", 11, "inf"])
 async def test_search_media_tolerates_missing_optional_data(score):
     session = SimpleNamespace(

@@ -1,4 +1,4 @@
-"""Tenrai-owned media fallback transport and response normalization.
+"""Tenrai-owned catalogue fallback transport and response normalization.
 
 This module contains every Tenrai-specific URL, request rule, error, and
 field mapping. It translates Tenrai responses into the AniList GraphQL
@@ -135,6 +135,39 @@ def _media_page(payload: dict[str, Any]) -> dict[str, Any]:
     return {"data": {"Page": {"media": results}}}
 
 
+def _character_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai character records into the shared AniList Page shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        description = item.get("about")
+        if isinstance(description, str):
+            description = description.replace("[Spoiler]", "~!").replace(
+                "[/Spoiler]", "!~"
+            )
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "name": {
+                    "full": item.get("name"),
+                    "native": item.get("name_kanji"),
+                },
+                "siteUrl": item.get("url"),
+                "description": description,
+                "image": _cover_image(item),
+                "gender": None,
+                "age": None,
+                "favourites": item.get("favorites"),
+            }
+        )
+    return {"data": {"Page": {"characters": results}}}
+
+
 async def _request(
     session: ClientSession, resource: str, params: dict[str, str]
 ) -> dict[str, Any]:
@@ -253,6 +286,14 @@ async def search_media(
     )
 
     return _media_page(payload)
+
+
+async def search_characters(
+    session: ClientSession, query: str, limit: int
+) -> dict[str, Any]:
+    """Search Tenrai and translate characters into an AniList Page response."""
+    payload = await _request(session, "characters", {"q": query, "limit": str(limit)})
+    return _character_page(payload)
 
 
 async def top_media(

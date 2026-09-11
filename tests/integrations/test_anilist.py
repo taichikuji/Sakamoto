@@ -527,11 +527,45 @@ async def test_anilist_403_falls_back_to_tenrai_and_caches_result(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch):
+    fallback = {
+        **CHARACTER,
+        "_provider": "Tenrai",
+        "siteUrl": "https://myanimelist.net/character/40/Luffy_Monkey_D_",
+        "gender": None,
+        "age": None,
+    }
+    request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
+    tenrai = AsyncMock(return_value={"data": {"Page": {"characters": [fallback]}}})
+    monkeypatch.setattr(anilist, "_request", request)
+    monkeypatch.setattr(anilist, "search_tenrai_characters", tenrai)
+    cog = _make_cog()
+    interaction = SimpleNamespace(command=SimpleNamespace(name="character"))
+
+    choices = await cog.search_query_autocomplete(interaction, "Luffy")
+    result, cached = await cog._cached_search(choices[0].value, "CHARACTER")
+
+    assert [(choice.name, choice.value) for choice in choices] == [
+        ("Monkey D. Luffy", "Monkey D. Luffy")
+    ]
+    assert (result, cached) == ([fallback], True)
+    request.assert_awaited_once()
+    tenrai.assert_awaited_once_with(cog.bot.session, "Luffy", 5)
+    embed = anilist.character_embed(fallback, 0x123456, cached=True)
+    assert [(field.name, field.value) for field in embed.fields[:2]] == [
+        ("⚧ Gender", "—"),
+        ("🎂 Age", "—"),
+    ]
+    assert embed.author.name == "Tenrai • Cache Hit"
+    assert embed.author.url == "https://tenrai.org/"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("search_type", "status"),
-    [("ANIME", 503), ("CHARACTER", 403)],
+    [("ANIME", 503), ("USER", 403)],
 )
-async def test_tenrai_fallback_is_limited_to_media_403(
+async def test_tenrai_fallback_is_limited_to_catalogue_403(
     monkeypatch, search_type, status
 ):
     monkeypatch.setattr(
@@ -539,26 +573,35 @@ async def test_tenrai_fallback_is_limited_to_media_403(
         "_request",
         AsyncMock(side_effect=anilist.AniListError("unavailable", status)),
     )
-    tenrai = AsyncMock()
-    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai)
+    tenrai_media = AsyncMock()
+    tenrai_characters = AsyncMock()
+    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai_media)
+    monkeypatch.setattr(anilist, "search_tenrai_characters", tenrai_characters)
 
     with pytest.raises(anilist.AniListError):
         await anilist._search_results(object(), "Berserk", search_type)
-    tenrai.assert_not_awaited()
+    tenrai_media.assert_not_awaited()
+    tenrai_characters.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_failed_tenrai_fallback_preserves_anilist_error(monkeypatch):
+@pytest.mark.parametrize(
+    ("search_type", "fallback_name"),
+    [("MANGA", "search_tenrai_media"), ("CHARACTER", "search_tenrai_characters")],
+)
+async def test_failed_tenrai_fallback_preserves_anilist_error(
+    monkeypatch, search_type, fallback_name
+):
     original = anilist.AniListError("disabled", 403)
     monkeypatch.setattr(anilist, "_request", AsyncMock(side_effect=original))
     monkeypatch.setattr(
         anilist,
-        "search_tenrai_media",
+        fallback_name,
         AsyncMock(side_effect=tenrai_fallback.TenraiError("unavailable", 503)),
     )
 
     with pytest.raises(anilist.AniListError) as raised:
-        await anilist._search_results(object(), "Berserk", "MANGA")
+        await anilist._search_results(object(), "Berserk", search_type)
     assert raised.value is original
 
 

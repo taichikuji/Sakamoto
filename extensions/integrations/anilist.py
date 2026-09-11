@@ -19,6 +19,7 @@ from discord.ui import Button, View, button
 
 # Tenrai owns fallback transport and errors; this module decides when to use it.
 from ._tenrai_fallback import TenraiError
+from ._tenrai_fallback import search_characters as search_tenrai_characters
 from ._tenrai_fallback import search_media as search_tenrai_media
 from ._tenrai_fallback import top_media as top_tenrai_media
 from ._tenrai_fallback import weekly_schedule as weekly_tenrai_schedule
@@ -277,14 +278,17 @@ async def _search_results(
     try:
         payload = await _request(session, document, variables)
     except AniListError as error:
-        if error.status != 403 or search_type not in ("ANIME", "MANGA"):
+        if error.status != 403 or search_type == "USER":
             raise
-        # This AniList search boundary owns the media-only, 403-only handoff.
+        # This AniList search boundary owns the 403-only catalogue handoff.
         logger.warning(
             "AniList %s search returned 403; using Tenrai", search_type.lower()
         )
         try:
-            payload = await search_tenrai_media(session, query, search_type, limit)
+            if search_type == "CHARACTER":
+                payload = await search_tenrai_characters(session, query, limit)
+            else:
+                payload = await search_tenrai_media(session, query, search_type, limit)
         except TenraiError as fallback_error:
             logger.warning(
                 "Tenrai %s fallback failed with status %s",
@@ -497,8 +501,12 @@ def character_embed(
     image_url = image.get("large") if isinstance(image, dict) else None
     if isinstance(image_url, str):
         embed.set_thumbnail(url=image_url)
-    author = "AniList • Cache Hit" if cached else "AniList"
-    embed.set_author(name=author, url="https://anilist.co/")
+    provider = "Tenrai" if character.get("_provider") == "Tenrai" else "AniList"
+    author = f"{provider} • Cache Hit" if cached else provider
+    embed.set_author(
+        name=author,
+        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    )
     return embed
 
 
