@@ -32,6 +32,7 @@ class QueueItem:
     duration: str
     stream_url: str | None = None
     refresh_stream: StreamResolver | None = None
+    thumbnail_url: str | None = None
 
 
 @dataclass
