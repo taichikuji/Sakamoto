@@ -59,7 +59,7 @@ async def test_close_closes_shared_session_before_base_bot(monkeypatch, main_mod
     session = MagicMock(close=AsyncMock())
     base_close = AsyncMock()
     bot.session = session
-    monkeypatch.setattr(main_module.commands.AutoShardedBot, "close", base_close)
+    monkeypatch.setattr(main_module.commands.Bot, "close", base_close)
 
     await bot.close()
 

@@ -14,7 +14,7 @@ if not (TOKEN := environ.get("TOKEN")):
     raise OSError("TOKEN environment variable not set")
 
 
-class Sakamoto(commands.AutoShardedBot):
+class Sakamoto(commands.Bot):
     """Discord bot with shared application resources."""
 
     def __init__(self):

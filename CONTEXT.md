@@ -25,6 +25,17 @@ Sakamoto is a voice-first Discord bot. Use the following terms consistently.
 
 Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot restart.
 
+## Maintainer preferences
+
+- `/load`, `/unload`, and `/reload` are core operational features. They allow a malfunctioning extension to be replaced without restarting the bot.
+- `/shutdown` is also intentional: it stops the process so Docker can restart a malfunctioning bot.
+- Persist unfinished actions only when process death would otherwise lose required cleanup, as with Temporary Rejoin Bans. Cover failure classes broadly; add scenario-specific machinery only after a real need appears.
+- An optional integration that requires an API token must fail its own extension setup when the token is absent, while allowing the rest of the bot to load normally.
+- Caches that reduce third-party requests are operational safeguards, not disposable optimizations. Keep freshness policies separate where the data differs: ordinary AniList searches may be cached for a week, while the weekly schedule must refresh much sooner.
+- Preserve request coalescing and autocomplete cache seeding when they prevent duplicate API calls. Music source caching should remain bounded and respect each signed stream URL's expiry to limit YouTube extraction traffic.
+- Prefer the smallest working implementation, existing code, standard-library or platform features, and no new dependency unless it provides a demonstrated benefit. Do not remove an intentional feature merely because it adds code.
+- Use a regular Discord bot until actual guild scale warrants sharding; do not enable sharding only as a precaution.
+
 ## Music runtime behavior
 
 - yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-entry cap and automatic expiry.
