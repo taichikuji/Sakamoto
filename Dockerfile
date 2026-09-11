@@ -2,7 +2,8 @@ FROM python:3.14-slim AS builder
 
 WORKDIR /usr/src/app
 
-# To restore QuickJS support for yt-dlp, uncomment this and the runtime COPY below.
+# To restore QuickJS support for yt-dlp, add yt-dlp-ejs and uncomment this and
+# the runtime COPY below.
 # RUN apt-get update -y && \
 #     apt-get install -y --no-install-recommends quickjs && \
 #     rm -rf /var/lib/apt/lists/*

@@ -562,20 +562,6 @@ async def test_failed_tenrai_fallback_preserves_anilist_error(monkeypatch):
     assert raised.value is original
 
 
-@pytest.mark.asyncio
-async def test_public_search_helpers_keep_first_result_contract(monkeypatch):
-    search = AsyncMock(side_effect=[[MANGA, {"id": 2}], [CHARACTER, {"id": 3}]])
-    monkeypatch.setattr(anilist, "_search_results", search)
-    session = object()
-
-    assert await anilist.search_media(session, " Berserk ", "MANGA") is MANGA
-    assert await anilist.search_character(session, " Luffy ") is CHARACTER
-    assert search.await_args_list == [
-        ((session, "Berserk", "MANGA", 1),),
-        ((session, "Luffy", "CHARACTER", 1),),
-    ]
-
-
 def test_manga_embed_uses_horizontal_manga_details():
     embed = anilist.media_embed(MANGA, "MANGA", 0x123456)
 

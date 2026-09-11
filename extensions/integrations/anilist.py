@@ -365,26 +365,6 @@ def _week_bounds(now: datetime | None = None) -> tuple[int, int]:
     return int(start.timestamp()), int((start + timedelta(days=7)).timestamp())
 
 
-async def search_media(
-    session: ClientSession, title: str, media_type: MediaType
-) -> dict[str, Any] | None:
-    """Return AniList's first safe media match for a title."""
-    title = title.strip()
-    if not title:
-        raise ValueError("An AniList search title is required.")
-    results = await _search_results(session, title, media_type, 1)
-    return results[0] if results else None
-
-
-async def search_character(session: ClientSession, name: str) -> dict[str, Any] | None:
-    """Return AniList's first character match for a name."""
-    name = name.strip()
-    if not name:
-        raise ValueError("An AniList character name is required.")
-    results = await _search_results(session, name, "CHARACTER", 1)
-    return results[0] if results else None
-
-
 def _label(value: Any) -> str:
     if not value:
         return "—"

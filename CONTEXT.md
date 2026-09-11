@@ -42,6 +42,23 @@ Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot 
 - FFmpeg runs as a child process during playback and exits when playback stops; disconnect cleanup removes the guild's Playback Session and clears its queue, current track, and command channel.
 - Repeated extraction and playback can leave the process at a higher RSS plateau after live objects are released because Python and glibc may retain freed pages. Stable elevated RSS alone does not establish a live-object leak.
 
+### YouTube JavaScript runtime fallback
+
+A 2026-09-11 Docker benchmark on Linux ARM64 used yt-dlp 2026.8.19 and the bot's normal search and audio-format settings. Each variant ran in three fresh containers against `charlie kirk slowed 1 hour`; every run selected the same format 251 Opus stream and passed an FFmpeg read probe.
+
+| Variant | Median extraction | Approximate image increase | Result |
+| --- | ---: | ---: | --- |
+| No EJS or runtime | 4.444 s | baseline | Pass |
+| EJS 0.8.0 only | 3.449 s | 0.06 MB | Pass; EJS cannot run |
+| QuickJS 2025-04-26 + EJS | 4.492 s | 1.03 MB | Pass |
+| Deno 2.9.4 + EJS | 3.711 s | 44.36 MB | Pass |
+| Node 24.21.0 + EJS | 3.307 s | 45.95 MB | Pass |
+| Bun 1.3.14 + EJS | 5.722 s | 37.37 MB | Pass; deprecated by yt-dlp |
+
+The default YouTube client did not invoke its challenge solver, so small timing differences are network noise rather than evidence that one runtime is faster. A forced `web` client failed both without a runtime and with QuickJS because of SABR/PO-token restrictions; adding a JavaScript runtime does not fix that failure class.
+
+Keep the image runtime-free while normal extraction and playback pass. If a real URL fails specifically because JavaScript challenge solving is unavailable, retest that URL with current versions and add matching `yt-dlp-ejs` plus QuickJS first because its image cost is smallest. Try Deno next if QuickJS fails or is too slow. Node has no demonstrated advantage here, and Bun should not be selected while deprecated.
+
 ## Resolved ambiguities
 
 - “Lobby” means Generator Channel (trigger) or Temporary Lobby (generated), never both.

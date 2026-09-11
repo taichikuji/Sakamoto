@@ -229,7 +229,7 @@ class MusicCog(commands.Cog):
             "no_warnings": True,
             "source_address": "0.0.0.0",
             "ignoreerrors": True,
-            # Enable only if YouTube playback requires QuickJS; also uncomment Dockerfile support.
+            # Enable only after restoring QuickJS and yt-dlp-ejs in the image.
             # "js_runtimes": {"quickjs": {}},
             "extract_flat": "in_playlist" if is_url else False,
             "noplaylist": not is_url,
