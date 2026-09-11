@@ -23,6 +23,8 @@ Sakamoto is a voice-first Discord bot. Use the following terms consistently.
 - A user has zero or one Steam Link.
 - A successful Voice Votekick creates one Temporary Rejoin Ban for its target in that channel.
 
+Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot restart.
+
 ## Music runtime behavior
 
 - yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-entry cap and automatic expiry.
