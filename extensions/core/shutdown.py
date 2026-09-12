@@ -17,6 +17,7 @@ class CloseCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="shutdown", description="Shuts down the bot gracefully.")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def shutdown_bot(self, interaction: Interaction) -> None:
         """Shutdown command for administrators."""

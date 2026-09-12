@@ -25,6 +25,7 @@ class ClearCog(commands.Cog):
         amount="Number of messages to scan and remove. Defaults to 1.",
         user="Only remove messages authored by this member.",
     )
+    @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def clear(
         self, interaction: Interaction, amount: int = 1, user: Member | None = None

@@ -1,7 +1,7 @@
 import logging
 from typing import TYPE_CHECKING
 
-from discord import Guild, HTTPException
+from discord import Guild, HTTPException, app_commands
 from discord.ext import commands
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ class SyncCog(commands.Cog):
         name="sync",
         description="Sync application commands globally and to current guild (Admin Only).",
     )
+    @app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def sync(self, ctx: commands.Context) -> None:
         """Sync commands globally and guild-specific."""

@@ -21,6 +21,7 @@ class LoaderCog(commands.Cog):
     @app_commands.describe(
         extension="Extension path relative to `extensions.`, such as `audio.music`."
     )
+    @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def load(self, interaction: Interaction, extension: str) -> None:
         """Load a bot extension."""
@@ -51,6 +52,7 @@ class LoaderCog(commands.Cog):
 
     @app_commands.command(name="unload", description="Unload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def unload(self, interaction: Interaction, extension: str) -> None:
         """Unload a bot extension."""
@@ -68,6 +70,7 @@ class LoaderCog(commands.Cog):
 
     @app_commands.command(name="reload", description="Reload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def reload(self, interaction: Interaction, extension: str) -> None:
         """Reload a bot extension."""

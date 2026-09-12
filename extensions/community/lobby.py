@@ -116,6 +116,7 @@ class RenameModal(Modal, title="Rename Channel"):
         )
 
 
+@app_commands.default_permissions(manage_channels=True)
 class LobbyCog(
     commands.GroupCog,
     group_name="lobby",
