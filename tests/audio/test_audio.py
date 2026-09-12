@@ -145,11 +145,14 @@ def _make_bot(*, session=None):
     )
 
 
-def _make_interaction(*, user, guild_id=1):
+def _make_interaction(*, user, guild_id=1, command_name="play"):
     message = SimpleNamespace(edit=AsyncMock())
     return SimpleNamespace(
         guild_id=guild_id,
         user=user,
+        client=SimpleNamespace(dispatch=MagicMock()),
+        command=SimpleNamespace(qualified_name=command_name),
+        command_failed=False,
         channel=SimpleNamespace(send=AsyncMock()),
         response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()),
@@ -358,6 +361,10 @@ async def test_control_commands_return_early_when_same_channel_check_fails(comma
     )
     interaction.response.send_message.assert_not_awaited()
     cog.engine.disconnect_and_cleanup.assert_not_awaited()
+    assert interaction.command_failed is True
+    interaction.client.dispatch.assert_called_once_with(
+        "app_command_failure", interaction, interaction.command
+    )
 
 
 def test_play_next_returns_without_voice_client(monkeypatch):
@@ -403,8 +410,9 @@ async def test_playlist_rejects_entries_without_urls():
     followup = AsyncMock()
 
     items = MusicCog(_make_bot()).playlist_items([{"title": "Unavailable"}])
-    await cog.enqueue_playlist(1, items, followup)
+    succeeded = await cog.enqueue_playlist(1, items, followup)
 
+    assert succeeded is False
     assert cog.queue_snapshot(1)[1] == ()
     followup.assert_awaited_once_with(
         ":x: The playlist contains no playable tracks.", ephemeral=True
@@ -642,6 +650,7 @@ async def test_radio_does_not_join_voice_when_station_resolution_fails(monkeypat
         ":x: No radio station found for that query.",
         ephemeral=True,
     )
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio
@@ -807,10 +816,8 @@ async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
     )
     cog = MusicCog(_make_bot())
+    cog.resolve_source = AsyncMock(side_effect=RuntimeError("yt-dlp failed"))
     monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
-    monkeypatch.setattr(
-        "extensions.audio.music.get_running_loop", lambda: DummyLoop(None)
-    )
 
     await MusicCog.play.callback(cog, interaction, query="missing")
 
@@ -818,6 +825,10 @@ async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
     connected_client.stop.assert_not_called()
     connected_client.disconnect.assert_awaited_once()
     assert cog.engine.sessions == {}
+    assert interaction.command_failed is True
+    interaction.client.dispatch.assert_called_once_with(
+        "app_command_failure", interaction, interaction.command
+    )
 
 
 @pytest.mark.asyncio
@@ -1102,7 +1113,7 @@ async def test_enqueue_or_play_queues_when_playing():
     _add_session(cog, vc)
     followup = AsyncMock()
 
-    await cog.enqueue_or_play(
+    succeeded = await cog.enqueue_or_play(
         1,
         QueueItem(
             "https://radio.garden/listen/mataroradio/sFtKSe5I",
@@ -1119,6 +1130,7 @@ async def test_enqueue_or_play_queues_when_playing():
         item.stream_url
         == "https://radio.garden/api/ara/content/listen/sFtKSe5I/channel.mp3"
     )
+    assert succeeded is True
     followup.assert_awaited_once()
 
 
@@ -1164,7 +1176,7 @@ async def test_enqueue_or_play_rejects_when_queue_is_full():
     _add_session(cog, vc, queue=[QueueItem("u", "t", "d")] * 50)
     followup = AsyncMock()
 
-    await cog.enqueue_or_play(
+    succeeded = await cog.enqueue_or_play(
         1,
         QueueItem(
             "https://youtube.test/watch?v=abc",
@@ -1180,6 +1192,7 @@ async def test_enqueue_or_play_rejects_when_queue_is_full():
         ephemeral=True,
     )
     assert cog.queued_count(1) == 50
+    assert succeeded is False
 
 
 @pytest.mark.asyncio
@@ -1262,6 +1275,7 @@ async def test_empty_queue_display_does_not_create_guild_state():
     await MusicCog.queue.callback(cog, interaction)
 
     assert 1 not in cog.engine.sessions
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio

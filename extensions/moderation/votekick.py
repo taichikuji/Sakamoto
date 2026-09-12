@@ -17,6 +17,8 @@ from discord import (
 from discord.ext import commands
 from discord.ui import Button, View, button
 
+from extensions.core.analytics import mark_app_command_failed
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -227,6 +229,7 @@ class ModerationCog(commands.Cog):
             await interaction.response.send_message(
                 ":x: This command can only be used in a server.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if not isinstance(author := interaction.user, Member):
@@ -234,6 +237,7 @@ class ModerationCog(commands.Cog):
                 ":x: You must be a member of this server to use this command.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         if not (author_voice := author.voice) or not (
@@ -243,24 +247,28 @@ class ModerationCog(commands.Cog):
                 ":x: You must be in a voice channel to start a votekick.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         if not (member_voice := member.voice) or member_voice.channel != voice_channel:
             await interaction.response.send_message(
                 f":x: {member.mention} is not in your voice channel.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if member.id == author.id:
             await interaction.response.send_message(
                 ":x: You cannot votekick yourself.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if member.bot:
             await interaction.response.send_message(
                 ":x: You cannot votekick a bot.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if member.id in self.votekicks:
@@ -268,6 +276,7 @@ class ModerationCog(commands.Cog):
                 f":x: A votekick for {member.mention} is already in progress.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         member_count = sum(

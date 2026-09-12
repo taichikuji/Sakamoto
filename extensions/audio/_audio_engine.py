@@ -97,19 +97,19 @@ class AudioEngine:
         *,
         now_playing_message: str | None = None,
         queue_message: str | None = None,
-    ) -> None:
+    ) -> bool:
         session = self.sessions.get(guild_id)
         if session is None or not session.voice_client.is_connected():
             await followup(
                 ":x: The bot is not connected to a voice channel.", ephemeral=True
             )
-            return
+            return False
 
         voice_client = session.voice_client
         if voice_client.is_playing() or voice_client.is_paused() or session.queue:
             if len(session.queue) >= 50:
                 await followup(":x: Queue is full (50 items).", ephemeral=True)
-                return
+                return False
 
             if item.duration != "LIVE":
                 item.stream_url = None
@@ -118,40 +118,42 @@ class AudioEngine:
                 queue_message
                 or f":ballot_box_with_check: Added to queue: **{item.title}** [{item.duration}]"
             )
-            return
+            return True
 
         if await self.play_song(guild_id, item):
             await followup(
                 now_playing_message
                 or f":notes: Now playing: **{item.title}** [{item.duration}]"
             )
+            return True
         else:
             await followup(":x: Failed to start playback.", ephemeral=True)
+            return False
 
     async def enqueue_playlist(
         self,
         guild_id: int,
         items: list[QueueItem],
         followup,
-    ) -> None:
+    ) -> bool:
         session = self.sessions.get(guild_id)
         if session is None or not session.voice_client.is_connected():
             await followup(
                 ":x: The bot is not connected to a voice channel.", ephemeral=True
             )
-            return
+            return False
 
         available_slots = 50 - len(session.queue)
         if available_slots <= 0:
             await followup(":x: Queue is full (50 items).", ephemeral=True)
-            return
+            return False
 
         added_items = items[:available_slots]
         if not added_items:
             await followup(
                 ":x: The playlist contains no playable tracks.", ephemeral=True
             )
-            return
+            return False
 
         session.queue.extend(added_items)
         voice_client = session.voice_client
@@ -162,13 +164,16 @@ class AudioEngine:
                     f":notes: Started playlist. Now playing: **{first.title}**\n"
                     f":ballot_box_with_check: Added {len(added_items) - 1} tracks to the queue."
                 )
+                return True
             else:
                 await followup(":x: Failed to start playlist playback.", ephemeral=True)
+                return False
         else:
             await followup(
                 f":ballot_box_with_check: Added **{len(added_items)}** tracks "
                 "from the playlist to the queue."
             )
+            return True
 
     async def get_or_connect_voice_client(
         self,

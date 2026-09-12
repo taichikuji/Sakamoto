@@ -743,6 +743,7 @@ async def test_character_command_rejects_empty_name():
         ":x: Enter a character name to search for.", ephemeral=True
     )
     interaction.response.defer.assert_not_awaited()
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio

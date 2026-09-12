@@ -29,6 +29,19 @@ def test_set_generator_keeps_optional_channel_description():
     assert channel_param.required is False
 
 
+@pytest.mark.asyncio
+async def test_missing_generator_clear_marks_command_failed(tmp_path):
+    cog = LobbyCog(DummyBot(tmp_path / "lobby.db"))
+    interaction = _make_interaction(user=object(), guild_id=77)
+
+    await LobbyCog.set_generator.callback(cog, interaction, None)
+
+    interaction.followup.send.assert_awaited_once_with(
+        ":x: No lobby generator is set for this server.", ephemeral=True
+    )
+    assert interaction.command_failed is True
+
+
 class DummyBot:
     def __init__(self, db_path: Path):
         self.db_path = str(db_path)

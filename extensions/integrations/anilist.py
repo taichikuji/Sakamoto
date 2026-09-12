@@ -17,6 +17,8 @@ from discord import (
 from discord.ext import commands
 from discord.ui import Button, View, button
 
+from extensions.core.analytics import mark_app_command_failed
+
 # Tenrai owns fallback transport and errors; this module decides when to use it.
 from ._tenrai_fallback import TenraiError
 from ._tenrai_fallback import search_characters as search_tenrai_characters
@@ -1042,6 +1044,7 @@ class AniListCog(
                 ":x: The bot's HTTP session is not ready. Please try again later.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         selected_type: MediaType = "MANGA" if media_type == "MANGA" else "ANIME"
@@ -1062,6 +1065,7 @@ class AniListCog(
                 else ":x: AniList is unavailable. Please try again later."
             )
             await interaction.followup.send(message, ephemeral=True)
+            mark_app_command_failed(interaction)
             return
 
         if not results:
@@ -1069,6 +1073,7 @@ class AniListCog(
                 f":mag: No {selected_type.lower()} found with those filters.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
         if len(results) == 1:
             embed = media_embed(
@@ -1099,6 +1104,7 @@ class AniListCog(
                 ":x: The bot's HTTP session is not ready. Please try again later.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         week_start, week_end = _week_bounds()
@@ -1115,6 +1121,7 @@ class AniListCog(
                 else ":x: AniList is unavailable. Please try again later."
             )
             await interaction.followup.send(message, ephemeral=True)
+            mark_app_command_failed(interaction)
             return
 
         pages = weekly_embeds(entries, self.bot.color, cached=cached)
@@ -1122,6 +1129,7 @@ class AniListCog(
             await interaction.followup.send(
                 ":mag: No anime are scheduled to air this week.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
         if len(pages) == 1:
             await interaction.followup.send(embed=pages[0])
@@ -1142,12 +1150,14 @@ class AniListCog(
             await interaction.response.send_message(
                 f":x: Enter a {label} {query_kind} to search for.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
         if self.bot.session is None:
             await interaction.response.send_message(
                 ":x: The bot's HTTP session is not ready. Please try again later.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         await interaction.response.defer()
@@ -1163,12 +1173,14 @@ class AniListCog(
                 else ":x: AniList is unavailable. Please try again later."
             )
             await interaction.followup.send(message, ephemeral=True)
+            mark_app_command_failed(interaction)
             return
 
         if not result:
             await interaction.followup.send(
                 f":mag: No {label} found for `{query}`.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
         if len(result) == 1:
             await interaction.followup.send(

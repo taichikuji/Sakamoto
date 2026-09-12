@@ -48,6 +48,14 @@ Extensions live in `extensions/`, grouped by responsibility:
 
 See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
 
+### Command analytics
+
+Sakamoto stores UTC daily aggregate command counts so the Discord application owner can review usage with `/analytics`. The report defaults to 30 days and accepts a period from 1 to 90 days.
+
+The analytics table contains only the command's fully qualified name and its successful and failed invocation counts. It does not store user or server history, Discord IDs, command arguments or options, message content, search terms, URLs, IP data, or command error details. Direct-message interactions are ignored. Daily rows are permanently deleted after 90 days.
+
+Every guild slash command completion and unhandled error is counted. Commands whose normal operation can end in a handled failure, such as an upstream service error or an immediate playback failure, additionally mark that outcome as failed instead of successful.
+
 ## Dependencies
 
 Can be seen @ [Pipfile](https://github.com/taichikuji/Sakamoto/blob/main/Pipfile)

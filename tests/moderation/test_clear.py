@@ -65,6 +65,7 @@ async def test_clear_rejects_non_text_channels_without_purging():
     interaction.followup.send.assert_awaited_once_with(
         ":x: This command can only be used in text channels.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio

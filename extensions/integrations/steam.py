@@ -9,6 +9,8 @@ from discord import Embed, Interaction, app_commands
 from discord.ext import commands
 from discord.utils import escape_markdown
 
+from extensions.core.analytics import mark_app_command_failed
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -227,12 +229,14 @@ class SteamCog(
                 ":x: The bot's Steam API key is not configured. Linking is currently unavailable. "
                 "Please contact the bot owner."
             )
+            mark_app_command_failed(interaction)
             return
 
         if not self.bot.session:
             await interaction.followup.send(
                 ":x: The bot's HTTP session is not ready. Please try again later."
             )
+            mark_app_command_failed(interaction)
             return
 
         steam_id, resolve_error = await self._resolve_steam_id(steam_identifier.strip())
@@ -240,6 +244,7 @@ class SteamCog(
             await interaction.followup.send(
                 self._steam_id_help_message(steam_identifier, resolve_error)
             )
+            mark_app_command_failed(interaction)
             return
 
         await self._save_steam_link(interaction.user.id, steam_id)
@@ -259,12 +264,14 @@ class SteamCog(
                 ":x: The bot's Steam API key is not configured. Lobby fetching is unavailable. "
                 "Please contact the bot owner."
             )
+            mark_app_command_failed(interaction)
             return
 
         if not self.bot.session:
             await interaction.followup.send(
                 ":x: The bot's HTTP session is not ready. Please try again later."
             )
+            mark_app_command_failed(interaction)
             return
 
         if not (linked_steam_id := await self._get_steam_link(interaction.user.id)):
@@ -272,6 +279,7 @@ class SteamCog(
                 ":information_source: Your Steam account is not linked. "
                 "Please use the `/steam link <your_steam_id_or_vanity_name>` command first."
             )
+            mark_app_command_failed(interaction)
             return
 
         try:
@@ -287,6 +295,7 @@ class SteamCog(
                     await interaction.followup.send(
                         self._steam_http_error_message(response.status)
                     )
+                    mark_app_command_failed(interaction)
                     return
 
                 data = await response.json()
@@ -296,6 +305,7 @@ class SteamCog(
                     ":x: Could not retrieve your player summary from Steam. "
                     "Ensure your Steam profile is public and you've linked the correct ID."
                 )
+                mark_app_command_failed(interaction)
                 return
 
             player_info = players[0]
@@ -306,6 +316,7 @@ class SteamCog(
                     ":x: You are not currently in a joinable game. "
                     "Please start a game and try again."
                 )
+                mark_app_command_failed(interaction)
                 return
 
             if not (lobby_id := player_info.get("lobbysteamid")) or lobby_id == "0":
@@ -314,6 +325,7 @@ class SteamCog(
                     f"(AppID: `{app_id}`), but you don't seem to be in a joinable lobby, "
                     "or your lobby details are private."
                 )
+                mark_app_command_failed(interaction)
                 return
 
             lobby_url = (
@@ -363,6 +375,7 @@ class SteamCog(
                 ":x: Steam returned an unexpected response format while fetching your "
                 "lobby details."
             )
+            mark_app_command_failed(interaction)
         except ClientError as error:
             logger.error(
                 "Network error in get_lobby for user %s (SteamID: %s): %s",
@@ -373,6 +386,7 @@ class SteamCog(
             await interaction.followup.send(
                 ":x: Network error while contacting Steam. Please try again in a moment."
             )
+            mark_app_command_failed(interaction)
         except Exception as error:
             logger.error(
                 "get_lobby command failed for user %s (SteamID: %s): %s",
@@ -383,6 +397,7 @@ class SteamCog(
             await interaction.followup.send(
                 ":x: An unexpected error occurred while trying to fetch your lobby information."
             )
+            mark_app_command_failed(interaction)
 
 
 async def setup(bot: Sakamoto):

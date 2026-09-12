@@ -131,6 +131,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     interaction.response.send_message.assert_awaited_with(
         ":x: This command can only be used in a server.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
     # Author not in voice
     interaction = _make_interaction(user=DummyMember(1), guild=object())
@@ -138,6 +139,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     interaction.response.send_message.assert_awaited_with(
         ":x: You must be in a voice channel to start a votekick.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
     # Target not in same voice channel
     author_channel = SimpleNamespace(id=1, members=[])
@@ -151,6 +153,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     interaction.response.send_message.assert_awaited_with(
         ":x: <@2> is not in your voice channel.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
     # Self-votekick
     interaction = _make_interaction(
@@ -162,6 +165,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     interaction.response.send_message.assert_awaited_with(
         ":x: You cannot votekick yourself.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
     # Bot target
     interaction = _make_interaction(
@@ -173,6 +177,7 @@ async def test_votekick_command_guardrails(monkeypatch):
     interaction.response.send_message.assert_awaited_with(
         ":x: You cannot votekick a bot.", ephemeral=True
     )
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio

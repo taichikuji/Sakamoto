@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from discord import app_commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,6 +27,25 @@ def test_bot_initializes_shared_resources(monkeypatch, main_module):
     assert bot.color == 0xFF3351
     assert bot.db_path == "data/sakamoto.sqlite"
     assert bot.intents.message_content is True
+    assert isinstance(bot.tree, main_module.SakamotoCommandTree)
+
+
+@pytest.mark.asyncio
+async def test_command_tree_dispatches_failures_without_awaiting_analytics(
+    monkeypatch, main_module
+):
+    bot = main_module.Sakamoto()
+    command = MagicMock()
+    interaction = MagicMock(command=command)
+    base_handler = AsyncMock()
+    monkeypatch.setattr(main_module.app_commands.CommandTree, "on_error", base_handler)
+    bot.dispatch = MagicMock()
+    error = app_commands.AppCommandError("boom")
+
+    await bot.tree.on_error(interaction, error)
+
+    bot.dispatch.assert_called_once_with("app_command_failure", interaction, command)
+    base_handler.assert_awaited_once_with(interaction, error)
 
 
 @pytest.mark.asyncio

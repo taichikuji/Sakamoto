@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 from discord import Interaction, Member, TextChannel, Thread, app_commands
 from discord.ext import commands
 
+from extensions.core.analytics import mark_app_command_failed
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -48,6 +50,7 @@ class ClearCog(commands.Cog):
             await interaction.followup.send(
                 ":x: This command can only be used in text channels.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
     @clear.error

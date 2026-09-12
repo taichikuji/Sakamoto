@@ -7,6 +7,8 @@ from urllib.parse import urljoin, urlparse
 from discord import Interaction, Member, app_commands
 from discord.ext import commands
 
+from extensions.core.analytics import mark_app_command_failed
+
 from ._audio_engine import QueueItem, get_audio_engine
 
 if TYPE_CHECKING:
@@ -83,6 +85,7 @@ class RadioCog(
                 ":x: You must provide a station query, URL, or channel ID.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
         await self.play_resolved_radio_station(interaction, query)
 
@@ -97,12 +100,14 @@ class RadioCog(
             await interaction.response.send_message(
                 ":x: Could not determine guild ID.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if not isinstance(user := interaction.user, Member):
             await interaction.response.send_message(
                 ":x: This command can only be used in a server.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if not user.voice or not user.voice.channel:
@@ -110,6 +115,7 @@ class RadioCog(
                 ":x: You need to be in a voice channel to use this command.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         await interaction.response.defer()
@@ -118,6 +124,7 @@ class RadioCog(
             await interaction.followup.send(
                 ":x: This command must be used in a text channel.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         try:
@@ -125,12 +132,14 @@ class RadioCog(
             stream_url = await self.resolve_radio_stream_url(station.channel_id)
         except ValueError as error:
             await interaction.followup.send(f":x: {error}", ephemeral=True)
+            mark_app_command_failed(interaction)
             return
         except Exception as error:
             logger.error("radio resolution failed: %s", error)
             await interaction.followup.send(
                 ":x: Failed to reach radio source. Try again later.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if (
@@ -139,11 +148,12 @@ class RadioCog(
             )
             is None
         ):
+            mark_app_command_failed(interaction)
             return
 
         self.engine.set_command_channel(guild_id, channel)
 
-        await self.engine.enqueue_or_play(
+        if not await self.engine.enqueue_or_play(
             guild_id,
             QueueItem(
                 source_url=self.radio_stream_url(station.channel_id),
@@ -158,7 +168,8 @@ class RadioCog(
             queue_message=(
                 f":ballot_box_with_check: Added to queue: :radio: **{station.title}** [LIVE]"
             ),
-        )
+        ):
+            mark_app_command_failed(interaction)
 
     async def resolve_radio_station(self, query: str | None) -> RadioStation:
         if query is None:

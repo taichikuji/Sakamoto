@@ -20,6 +20,8 @@ from discord import (
 from discord.ext import commands
 from discord.ui import Button, Modal, TextInput, View, button
 
+from extensions.core.analytics import mark_app_command_failed
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -252,6 +254,7 @@ class LobbyCog(
                 await interaction.followup.send(
                     ":x: No lobby generator is set for this server.", ephemeral=True
                 )
+                mark_app_command_failed(interaction)
                 return
             await self._remove_generator(guild_id)
             await interaction.followup.send(

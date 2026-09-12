@@ -19,6 +19,8 @@ from discord.ui import Button, View, button
 from discord.utils import escape_markdown
 from yt_dlp import YoutubeDL
 
+from extensions.core.analytics import mark_app_command_failed
+
 from ._audio_engine import QueueItem, get_audio_engine
 
 if TYPE_CHECKING:
@@ -148,6 +150,7 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message(
                 ":x: You must provide a search term or URL.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         guild_id = interaction.guild_id
@@ -156,6 +159,7 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message(
                 ":x: This command can only be used in a server.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         if not user.voice or not user.voice.channel:
@@ -163,6 +167,7 @@ class MusicCog(commands.Cog):
                 ":x: You need to be in a voice channel to use this command.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
 
         await interaction.response.defer()
@@ -171,6 +176,7 @@ class MusicCog(commands.Cog):
             await interaction.followup.send(
                 ":x: This command must be used in a text channel.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         was_connected = self.engine.is_connected(guild_id)
@@ -184,6 +190,7 @@ class MusicCog(commands.Cog):
             return_exceptions=True,
         )
         if voice_client is None:
+            mark_app_command_failed(interaction)
             return
 
         try:
@@ -200,18 +207,20 @@ class MusicCog(commands.Cog):
                 if not entries:
                     raise ValueError("The playlist is empty or private.")
 
-                await self.engine.enqueue_playlist(
+                if not await self.engine.enqueue_playlist(
                     guild_id=guild_id,
                     items=self.playlist_items(entries),
                     followup=interaction.followup.send,
-                )
+                ):
+                    mark_app_command_failed(interaction)
                 return
 
-            await self.engine.enqueue_or_play(
+            if not await self.engine.enqueue_or_play(
                 guild_id,
                 self.queue_item(self._first_track(info), requested_url=query),
                 followup=interaction.followup.send,
-            )
+            ):
+                mark_app_command_failed(interaction)
 
         except Exception as error:
             if not was_connected:
@@ -219,6 +228,7 @@ class MusicCog(commands.Cog):
             await interaction.followup.send(
                 f":x: Failed to retrieve audio. Error: {error}", ephemeral=True
             )
+            mark_app_command_failed(interaction)
 
     def search_source(self, query: str) -> dict:
         """Resolve one complete result, or a flat playlist."""
@@ -418,6 +428,7 @@ class MusicCog(commands.Cog):
             await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
             is None
         ):
+            mark_app_command_failed(interaction)
             return
         await self.engine.disconnect_and_cleanup(guild_id)
         await interaction.response.send_message(
@@ -438,6 +449,7 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message(
                 ":x: The music queue is currently empty."
             )
+            mark_app_command_failed(interaction)
             return
 
         sections = []
@@ -488,12 +500,14 @@ class MusicCog(commands.Cog):
                 interaction, guild_id
             )
         ) is None:
+            mark_app_command_failed(interaction)
             return
 
         if not voice_client.is_playing() and not voice_client.is_paused():
             await interaction.response.send_message(
                 ":x: Nothing is currently playing.", ephemeral=True
             )
+            mark_app_command_failed(interaction)
             return
 
         queue_length = self.engine.queued_count(guild_id)
@@ -504,6 +518,7 @@ class MusicCog(commands.Cog):
                 "Please try again.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
             return
         self.engine.skip_tracks(guild_id, amount)
 

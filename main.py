@@ -4,7 +4,7 @@ from os import environ
 from pathlib import Path
 
 from aiohttp import ClientSession
-from discord import Activity, ActivityType, Intents
+from discord import Activity, ActivityType, Intents, Interaction, app_commands
 from discord.ext import commands
 from discord.utils import setup_logging
 
@@ -13,6 +13,19 @@ logger = logging.getLogger("Sakamoto")
 
 if not (TOKEN := environ.get("TOKEN")):
     raise OSError("TOKEN environment variable not set")
+
+
+class SakamotoCommandTree(app_commands.CommandTree):
+    """Dispatch app-command failures without delaying their error handlers."""
+
+    async def on_error(
+        self, interaction: Interaction, error: app_commands.AppCommandError, /
+    ) -> None:
+        if interaction.command is not None:
+            self.client.dispatch(
+                "app_command_failure", interaction, interaction.command
+            )
+        await super().on_error(interaction, error)
 
 
 class Sakamoto(commands.Bot):
@@ -26,6 +39,7 @@ class Sakamoto(commands.Bot):
             command_prefix=commands.when_mentioned,
             case_insensitive=True,
             intents=intents,
+            tree_cls=SakamotoCommandTree,
         )
         self.started_at = time.monotonic()
         self.session: ClientSession | None = None

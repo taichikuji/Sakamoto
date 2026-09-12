@@ -224,6 +224,7 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
     interaction.followup.send.assert_awaited_with(
         ":x: The bot's Steam API key is not configured. Linking is currently unavailable. Please contact the bot owner."
     )
+    assert interaction.command_failed is True
 
     monkeypatch.setattr("extensions.integrations.steam.STEAM_TOKEN", "token")
     interaction = _make_interaction()
@@ -232,6 +233,7 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
     interaction.followup.send.assert_awaited_with(
         ":x: The bot's HTTP session is not ready. Please try again later."
     )
+    assert interaction.command_failed is True
 
     interaction = _make_interaction()
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam3.db", session=DummySession([])))
@@ -246,6 +248,7 @@ async def test_link_steam_guardrails_and_success(monkeypatch, tmp_path):
         "Reason: Steam could not find that vanity profile name (success code 42)."
         in (interaction.followup.send.await_args.args[0])
     )
+    assert interaction.command_failed is True
 
     interaction = _make_interaction(user_id=7)
     cog = SteamCog(DummyBot(db_path=tmp_path / "steam4.db", session=DummySession([])))
@@ -285,6 +288,7 @@ async def test_get_lobby_guardrails(monkeypatch, tmp_path):
         ":information_source: Your Steam account is not linked. "
         "Please use the `/steam link <your_steam_id_or_vanity_name>` command first."
     )
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio
