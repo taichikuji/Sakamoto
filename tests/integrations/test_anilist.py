@@ -553,8 +553,8 @@ async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch)
     tenrai.assert_awaited_once_with(cog.bot.session, "Luffy", 5)
     embed = anilist.character_embed(fallback, 0x123456, cached=True)
     assert [(field.name, field.value) for field in embed.fields[:2]] == [
-        ("⚧ Gender", "—"),
-        ("🎂 Age", "—"),
+        (":transgender_symbol: Gender", "—"),
+        (":birthday: Age", "—"),
     ]
     assert embed.author.name == "Tenrai • Cache Hit"
     assert embed.author.url == "https://tenrai.org/"
@@ -614,9 +614,9 @@ def test_manga_embed_uses_horizontal_manga_details():
     assert "<i>" not in embed.description
     assert "Notes:" in embed.description
     assert [(field.name, field.value) for field in embed.fields] == [
-        ("⭐ Score", "90/100"),
-        ("📚 Ch / Vol", "380 / 42"),
-        ("📡 Status", "Finished"),
+        (":star: Score", "90/100"),
+        (":books: Ch / Vol", "380 / 42"),
+        (":satellite: Status", "Finished"),
     ]
     assert embed.footer.text == "Manga • Action • Drama • Fantasy"
     assert embed.thumbnail.url == MANGA["coverImage"]["large"]
@@ -636,7 +636,7 @@ async def test_manga_command_uses_shared_search_path():
     cog._cached_search.assert_awaited_once_with("Berserk", "MANGA")
     embed = interaction.followup.send.await_args.kwargs["embed"]
     assert embed.title == "Berserk"
-    assert embed.fields[1].name == "📚 Ch / Vol"
+    assert embed.fields[1].name == ":books: Ch / Vol"
     assert embed.author.name == "AniList • Cache Hit"
 
 
@@ -677,9 +677,9 @@ def test_character_embed_uses_character_details():
     assert embed.url == CHARACTER["siteUrl"]
     assert embed.description == "Captain of the Straw Hat Pirates.\n\nDream: King."
     assert [(field.name, field.value) for field in embed.fields] == [
-        ("⚧ Gender", "Male"),
-        ("🎂 Age", "19"),
-        ("❤️ Favourites", "123,456"),
+        (":transgender_symbol: Gender", "Male"),
+        (":birthday: Age", "19"),
+        (":heart: Favourites", "123,456"),
     ]
     assert embed.footer.text == "Character • モンキー・D・ルフィ"
     assert embed.thumbnail.url == CHARACTER["image"]["large"]
@@ -693,9 +693,9 @@ def test_user_embed_uses_public_profile_details():
     assert embed.url == USER["siteUrl"]
     assert embed.description == "Anime and manga fan.\n\nHello!"
     assert [(field.name, field.value) for field in embed.fields] == [
-        ("📺 Anime", "321 entries\n4,567 episodes"),
-        ("📚 Manga", "89 entries\n12,345 chapters"),
-        ("📅 Joined", "<t:1609459200:D>"),
+        (":tv: Anime", "321 entries\n4,567 episodes"),
+        (":books: Manga", "89 entries\n12,345 chapters"),
+        (":date: Joined", "<t:1609459200:D>"),
     ]
     assert embed.thumbnail.url == USER["avatar"]["large"]
     assert embed.image.url == USER["bannerImage"]

@@ -422,22 +422,22 @@ def media_embed(
         color=color,
     )
     score = media.get("averageScore")
-    metrics = [("⭐ Score", f"{score}/100" if isinstance(score, int) else "—")]
+    metrics = [(":star: Score", f"{score}/100" if isinstance(score, int) else "—")]
     if media_type == "ANIME":
         metrics.extend(
             (
-                ("🎬 Episodes", str(media.get("episodes") or "—")),
-                ("📡 Status", _label(media.get("status"))),
+                (":clapper: Episodes", str(media.get("episodes") or "—")),
+                (":satellite: Status", _label(media.get("status"))),
             )
         )
     else:
         metrics.extend(
             (
                 (
-                    "📚 Ch / Vol",
+                    ":books: Ch / Vol",
                     f"{media.get('chapters') or '—'} / {media.get('volumes') or '—'}",
                 ),
-                ("📡 Status", _label(media.get("status"))),
+                (":satellite: Status", _label(media.get("status"))),
             )
         )
     for name, value in metrics:
@@ -483,10 +483,10 @@ def character_embed(
     )
     favourites = character.get("favourites")
     metrics = (
-        ("⚧ Gender", str(character.get("gender") or "—")),
-        ("🎂 Age", str(character.get("age") or "—")),
+        (":transgender_symbol: Gender", str(character.get("gender") or "—")),
+        (":birthday: Age", str(character.get("age") or "—")),
         (
-            "❤️ Favourites",
+            ":heart: Favourites",
             f"{favourites:,}" if isinstance(favourites, int) else "—",
         ),
     )
@@ -527,8 +527,8 @@ def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Emb
     if not isinstance(statistics, dict):
         statistics = {}
     categories = (
-        ("📺 Anime", statistics.get("anime"), "episodesWatched", "episodes"),
-        ("📚 Manga", statistics.get("manga"), "chaptersRead", "chapters"),
+        (":tv: Anime", statistics.get("anime"), "episodesWatched", "episodes"),
+        (":books: Manga", statistics.get("manga"), "chaptersRead", "chapters"),
     )
     for label, values, progress_key, progress_label in categories:
         if not isinstance(values, dict):
@@ -548,7 +548,7 @@ def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Emb
 
     created_at = user.get("createdAt")
     embed.add_field(
-        name="📅 Joined",
+        name=":date: Joined",
         value=f"<t:{created_at}:D>" if isinstance(created_at, int) else "—",
         inline=True,
     )

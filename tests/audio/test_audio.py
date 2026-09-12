@@ -1219,7 +1219,7 @@ async def test_queue_displays_playback_state():
 
     embed = interaction.response.send_message.await_args.kwargs["embed"]
     view = interaction.response.send_message.await_args.kwargs["view"]
-    assert embed.title == "🎵 Music Queue"
+    assert embed.title == ":musical_note: Music Queue"
     assert embed.description.startswith(
         "**Now Playing**\n"
         "[Current \\*Track*](https://example.test/current) [`2:00`]\n\n"

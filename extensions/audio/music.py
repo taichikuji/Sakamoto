@@ -470,7 +470,7 @@ class MusicCog(commands.Cog):
                 )
             )
         embed = Embed(
-            title="🎵 Music Queue",
+            title=":musical_note: Music Queue",
             description="\n\n".join(sections),
             color=self.bot.color,
         )
