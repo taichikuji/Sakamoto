@@ -174,8 +174,19 @@ query (
 class AniListError(Exception):
     """AniList could not return a usable response."""
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        *,
+        unavailable: bool = False,
+    ) -> None:
         self.status = status
+        self.unavailable = (
+            unavailable
+            or status in {403, 429}
+            or (status is not None and 500 <= status < 600)
+        )
         super().__init__(message)
 
 
@@ -243,7 +254,7 @@ async def _request(
             except (TypeError, ValueError) as error:
                 raise AniListError("AniList returned invalid JSON.") from error
     except (ClientError, TimeoutError) as error:
-        raise AniListError("Could not reach AniList.") from error
+        raise AniListError("Could not reach AniList.", unavailable=True) from error
 
     if not isinstance(payload, dict) or payload.get("errors"):
         raise AniListError("AniList rejected the search.")
@@ -280,11 +291,12 @@ async def _search_results(
     try:
         payload = await _request(session, document, variables)
     except AniListError as error:
-        if error.status != 403 or search_type == "USER":
+        if not error.unavailable or search_type == "USER":
             raise
-        # This AniList search boundary owns the 403-only catalogue handoff.
         logger.warning(
-            "AniList %s search returned 403; using Tenrai", search_type.lower()
+            "AniList %s search unavailable with status %s; using Tenrai",
+            search_type.lower(),
+            error.status or "transport",
         )
         try:
             if search_type == "CHARACTER":
@@ -329,9 +341,12 @@ async def _weekly_schedule_results(
                 return results
             page += 1
     except AniListError as error:
-        if error.status != 403:
+        if not error.unavailable:
             raise
-        logger.warning("AniList weekly schedule returned 403; using Tenrai")
+        logger.warning(
+            "AniList weekly schedule unavailable with status %s; using Tenrai",
+            error.status or "transport",
+        )
         try:
             return await weekly_tenrai_schedule(session, week_start, week_end)
         except TenraiError as fallback_error:
@@ -844,9 +859,12 @@ class AniListCog(
                     self.bot.session, media_type, **fallback_args
                 )
             except AniListError as error:
-                if error.status != 403:
+                if not error.unavailable:
                     raise
-                logger.warning("AniList top ranking returned 403; using Tenrai")
+                logger.warning(
+                    "AniList top ranking unavailable with status %s; using Tenrai",
+                    error.status or "transport",
+                )
                 try:
                     payload = await top_tenrai_media(
                         self.bot.session,

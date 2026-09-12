@@ -3,9 +3,10 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -197,9 +198,17 @@ async def test_tenrai_top_translates_filters_and_media_in_one_request(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_top_403_uses_one_tenrai_request_per_uncached_filter_set(monkeypatch):
+@pytest.mark.parametrize(
+    ("status", "transport"),
+    [(403, False), (429, False), (503, False), (None, True)],
+)
+async def test_top_unavailability_uses_one_tenrai_request_per_uncached_filter_set(
+    monkeypatch, status, transport
+):
     fallback = {**ANIME, "_provider": "Tenrai"}
-    request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
+    request = AsyncMock(
+        side_effect=anilist.AniListError("unavailable", status, unavailable=transport)
+    )
     tenrai = AsyncMock(return_value={"data": {"Page": {"media": [fallback]}}})
     monkeypatch.setattr(anilist, "_request", request)
     monkeypatch.setattr(anilist, "top_tenrai_media", tenrai)
@@ -230,6 +239,19 @@ async def test_top_403_preserves_anilist_error_when_tenrai_fails(monkeypatch):
     with pytest.raises(anilist.AniListError) as raised:
         await _make_cog()._cached_top("ANIME")
     assert raised.value is original
+
+
+@pytest.mark.asyncio
+async def test_top_400_does_not_fall_back_to_tenrai(monkeypatch):
+    original = anilist.AniListError("bad request", 400)
+    monkeypatch.setattr(anilist, "_request", AsyncMock(side_effect=original))
+    tenrai = AsyncMock()
+    monkeypatch.setattr(anilist, "top_tenrai_media", tenrai)
+
+    with pytest.raises(anilist.AniListError) as raised:
+        await _make_cog()._cached_top("ANIME")
+    assert raised.value is original
+    tenrai.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -378,13 +400,23 @@ async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
 
 
 @pytest.mark.asyncio
-async def test_weekly_schedule_403_falls_back_to_tenrai(monkeypatch):
+@pytest.mark.parametrize(
+    ("status", "transport"),
+    [(403, False), (429, False), (503, False), (None, True)],
+)
+async def test_weekly_schedule_unavailability_falls_back_to_tenrai(
+    monkeypatch, status, transport
+):
     fallback = {**SCHEDULE_ENTRY, "_provider": "Tenrai", "episode": None}
     session = object()
     monkeypatch.setattr(
         anilist,
         "_request",
-        AsyncMock(side_effect=anilist.AniListError("disabled", 403)),
+        AsyncMock(
+            side_effect=anilist.AniListError(
+                "unavailable", status, unavailable=transport
+            )
+        ),
     )
     tenrai = AsyncMock(return_value=[fallback])
     monkeypatch.setattr(anilist, "weekly_tenrai_schedule", tenrai)
@@ -396,11 +428,11 @@ async def test_weekly_schedule_403_falls_back_to_tenrai(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_weekly_schedule_does_not_fallback_for_other_errors(monkeypatch):
+async def test_weekly_schedule_400_does_not_fallback(monkeypatch):
     monkeypatch.setattr(
         anilist,
         "_request",
-        AsyncMock(side_effect=anilist.AniListError("unavailable", 503)),
+        AsyncMock(side_effect=anilist.AniListError("bad request", 400)),
     )
     tenrai = AsyncMock()
     monkeypatch.setattr(anilist, "weekly_tenrai_schedule", tenrai)
@@ -523,9 +555,17 @@ async def test_search_results_selects_document_variables_and_collection(
 
 
 @pytest.mark.asyncio
-async def test_anilist_403_falls_back_to_tenrai_and_caches_result(monkeypatch):
+@pytest.mark.parametrize(
+    ("status", "transport"),
+    [(403, False), (429, False), (503, False), (None, True)],
+)
+async def test_anilist_unavailability_falls_back_to_tenrai_and_caches_result(
+    monkeypatch, status, transport
+):
     fallback = {**MANGA, "_provider": "Tenrai"}
-    request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
+    request = AsyncMock(
+        side_effect=anilist.AniListError("unavailable", status, unavailable=transport)
+    )
     tenrai = AsyncMock(return_value={"data": {"Page": {"media": [fallback]}}})
     monkeypatch.setattr(anilist, "_request", request)
     monkeypatch.setattr(anilist, "search_tenrai_media", tenrai)
@@ -577,9 +617,9 @@ async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch)
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("search_type", "status"),
-    [("ANIME", 503), ("USER", 403)],
+    [("ANIME", 400), ("USER", 403), ("USER", 429), ("USER", 503)],
 )
-async def test_tenrai_fallback_is_limited_to_catalogue_403(
+async def test_tenrai_fallback_excludes_bad_requests_and_user_lookup(
     monkeypatch, search_type, status
 ):
     monkeypatch.setattr(
@@ -596,6 +636,18 @@ async def test_tenrai_fallback_is_limited_to_catalogue_403(
         await anilist._search_results(object(), "Berserk", search_type)
     tenrai_media.assert_not_awaited()
     tenrai_characters.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_error", [ClientError("dns"), TimeoutError()])
+async def test_request_marks_transport_failures_unavailable(transport_error):
+    session = SimpleNamespace(post=MagicMock(side_effect=transport_error))
+
+    with pytest.raises(anilist.AniListError) as raised:
+        await anilist._request(session, "query", {})
+
+    assert raised.value.status is None
+    assert raised.value.unavailable is True
 
 
 @pytest.mark.asyncio
