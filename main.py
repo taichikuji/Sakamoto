@@ -16,15 +16,16 @@ if not (TOKEN := environ.get("TOKEN")):
 
 
 class SakamotoCommandTree(app_commands.CommandTree):
-    """Dispatch app-command failures without delaying their error handlers."""
+    """Reject DM interactions and dispatch failures without delay."""
+
+    async def interaction_check(self, interaction: Interaction, /) -> bool:
+        return interaction.guild_id is not None
 
     async def on_error(
         self, interaction: Interaction, error: app_commands.AppCommandError, /
     ) -> None:
-        if interaction.command is not None:
-            self.client.dispatch(
-                "app_command_failure", interaction, interaction.command
-            )
+        if command := interaction.command:
+            self.client.dispatch("app_command_failure", interaction, command)
         await super().on_error(interaction, error)
 
 
@@ -38,6 +39,8 @@ class Sakamoto(commands.Bot):
             description="You thought all I say is meow?",
             command_prefix=commands.when_mentioned,
             case_insensitive=True,
+            help_command=None,
+            allowed_contexts=app_commands.AppCommandContext(guild=True),
             intents=intents,
             tree_cls=SakamotoCommandTree,
         )
@@ -78,4 +81,4 @@ class Sakamoto(commands.Bot):
 
 if __name__ == "__main__":
     logger.info("Starting Sakamoto...")
-    Sakamoto().run(TOKEN, reconnect=True, log_handler=None)
+    Sakamoto().run(TOKEN, log_handler=None)

@@ -69,11 +69,13 @@ async def test_on_message_ignores_bot_messages_and_empty_content():
         author=SimpleNamespace(bot=True),
         content="https://twitter.com/a/status/1",
         channel=channel,
+        guild=object(),
     )
     empty_message = SimpleNamespace(
         author=SimpleNamespace(bot=False),
         content="",
         channel=channel,
+        guild=object(),
     )
 
     await cog.on_message(bot_message)
@@ -90,6 +92,7 @@ async def test_on_message_ignores_messages_without_urls():
         author=SimpleNamespace(bot=False),
         content="hello world",
         channel=channel,
+        guild=object(),
     )
 
     await cog.on_message(message)
@@ -105,8 +108,25 @@ async def test_on_message_sends_rewritten_text_when_content_changes():
         author=SimpleNamespace(bot=False),
         content="https://twitter.com/alice/status/12345",
         channel=channel,
+        guild=object(),
     )
 
     await cog.on_message(message)
 
     channel.send.assert_awaited_once_with("https://fixupx.com/alice/status/12345")
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_direct_messages():
+    cog = ReplaceCog(SimpleNamespace())
+    channel = SimpleNamespace(send=AsyncMock())
+    message = SimpleNamespace(
+        author=SimpleNamespace(bot=False),
+        content="https://twitter.com/alice/status/12345",
+        channel=channel,
+        guild=None,
+    )
+
+    await cog.on_message(message)
+
+    channel.send.assert_not_awaited()

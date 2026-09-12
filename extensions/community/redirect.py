@@ -38,7 +38,7 @@ class ReplaceCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: Message) -> None:
         """Send rewritten text when a non-bot message contains a supported URL."""
-        if message.author.bot or not message.content:
+        if message.guild is None or message.author.bot or not message.content:
             return
         if "http://" not in message.content and "https://" not in message.content:
             return

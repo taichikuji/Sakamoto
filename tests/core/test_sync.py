@@ -89,23 +89,39 @@ async def test_sync_command_uses_followup_for_slash_context():
 
 
 @pytest.mark.asyncio
-async def test_sync_command_uses_ctx_send_for_non_slash_context():
+async def test_sync_command_uses_ctx_send_for_prefix_context():
+    guild = SimpleNamespace(id=5)
     ctx = SimpleNamespace(
         interaction=None,
-        guild=None,
+        guild=guild,
         defer=AsyncMock(),
         send=AsyncMock(),
     )
     cog = SyncCog(SimpleNamespace(tree=SimpleNamespace(sync=AsyncMock())))
-    cog._sync_scope = AsyncMock(return_value="global only")
+    cog._sync_scope = AsyncMock(side_effect=["global ok", "guild ok"])
 
     await SyncCog.sync.callback(cog, ctx)
 
-    cog._sync_scope.assert_awaited_once_with()
+    assert [call.args for call in cog._sync_scope.await_args_list] == [(), (guild,)]
     ctx.defer.assert_not_awaited()
     ctx.send.assert_awaited_once_with(
-        "global only\nSkipped guild sync (not in server).\n\n**Note:** Restart Discord client to see changes."
+        "global ok\nguild ok\n\n**Note:** Restart Discord client to see changes."
     )
+
+
+@pytest.mark.asyncio
+async def test_sync_rejects_dms_silently(monkeypatch):
+    ctx = SimpleNamespace(interaction=None, send=AsyncMock())
+    cog = SyncCog(SimpleNamespace())
+    fake_logger = MagicMock()
+    monkeypatch.setattr("extensions.core.sync.logger", fake_logger)
+
+    await cog.on_sync_error(ctx, commands.NoPrivateMessage())
+
+    assert SyncCog.sync.app_command.guild_only is True
+    assert len(SyncCog.sync.checks) == 2
+    ctx.send.assert_not_awaited()
+    fake_logger.error.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,7 +28,19 @@ def test_bot_initializes_shared_resources(monkeypatch, main_module):
     assert bot.color == 0xFF3351
     assert bot.db_path == "data/sakamoto.sqlite"
     assert bot.intents.message_content is True
+    assert bot.help_command is None
     assert isinstance(bot.tree, main_module.SakamotoCommandTree)
+    assert bot.tree.allowed_contexts.guild is True
+    assert bot.tree.allowed_contexts.dm_channel is False
+    assert bot.tree.allowed_contexts.private_channel is False
+
+
+@pytest.mark.asyncio
+async def test_command_tree_accepts_guilds_and_silently_rejects_dms(main_module):
+    tree = main_module.Sakamoto().tree
+
+    assert await tree.interaction_check(SimpleNamespace(guild_id=123)) is True
+    assert await tree.interaction_check(SimpleNamespace(guild_id=None)) is False
 
 
 @pytest.mark.asyncio

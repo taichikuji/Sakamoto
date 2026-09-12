@@ -33,22 +33,18 @@ class SyncCog(commands.Cog):
         description="Sync application commands globally and to current guild (Admin Only).",
     )
     @app_commands.default_permissions(administrator=True)
+    @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def sync(self, ctx: commands.Context) -> None:
         """Sync commands globally and guild-specific."""
-        if is_slash := ctx.interaction is not None:
+        if ctx.interaction:
             await ctx.defer(ephemeral=True)
 
         global_msg = await self._sync_scope()
-
-        if ctx.guild:
-            guild_msg = await self._sync_scope(ctx.guild)
-        else:
-            guild_msg = "Skipped guild sync (not in server)."
-
+        guild_msg = await self._sync_scope(ctx.guild)
         final_msg = f"{global_msg}\n{guild_msg}\n\n**Note:** Restart Discord client to see changes."
 
-        if is_slash and ctx.interaction:
+        if ctx.interaction:
             await ctx.interaction.followup.send(final_msg, ephemeral=True)
         else:
             await ctx.send(final_msg)
@@ -58,6 +54,8 @@ class SyncCog(commands.Cog):
         self, ctx: commands.Context, error: commands.CommandError
     ) -> None:
         """Handle errors for the sync command."""
+        if isinstance(error, commands.NoPrivateMessage):
+            return
         if isinstance(error, commands.MissingPermissions):
             msg = ":x: You need Administrator permissions to run this command."
             if ctx.interaction:
