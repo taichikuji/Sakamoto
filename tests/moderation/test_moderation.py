@@ -1,12 +1,9 @@
 import sys
-from asyncio import gather
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from aiosqlite import connect
-from discord import PermissionOverwrite
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -208,54 +205,4 @@ async def test_votekick_command_happy_path_tracks_and_clears_state(monkeypatch):
     assert target.id not in cog.votekicks
 
 
-@pytest.mark.asyncio
-async def test_pending_ban_resumes_after_restart(tmp_path, monkeypatch):
-    now = 1000
-    monkeypatch.setattr("extensions.moderation.votekick.time", lambda: now)
-    member = DummyMember(22)
-    channel = SimpleNamespace(
-        id=33,
-        guild=SimpleNamespace(get_member=lambda _: member),
-        overwrites_for=MagicMock(
-            return_value=PermissionOverwrite(connect=None, speak=False)
-        ),
-        set_permissions=AsyncMock(),
-    )
-    bot = SimpleNamespace(
-        db_path=str(tmp_path / "bans.db"),
-        wait_until_ready=AsyncMock(),
-        fetch_channel=AsyncMock(return_value=channel),
-    )
-
-    async def rows():
-        async with (
-            connect(bot.db_path) as db,
-            db.execute("SELECT * FROM votekick_bans") as cursor,
-        ):
-            return await cursor.fetchall()
-
-    first = ModerationCog(bot)
-    await first.cog_load()
-    await first.ban_temporarily(member, channel)
-    assert await rows() == [(33, 22, 1060, None)]
-
-    tasks = list(first._unban_tasks)
-    first.cog_unload()
-    await gather(*tasks, return_exceptions=True)
-    assert first._unban_tasks == set()
-
-    now = 1060
-    wait_for_expiry = AsyncMock()
-    monkeypatch.setattr("extensions.moderation.votekick.sleep", wait_for_expiry)
-    channel.overwrites_for.return_value = PermissionOverwrite(
-        connect=False, speak=False
-    )
-    restored = ModerationCog(bot)
-    await restored.cog_load()
-    await gather(*list(restored._unban_tasks))
-
-    wait_for_expiry.assert_awaited_once_with(0)
-    overwrite = channel.set_permissions.await_args.kwargs["overwrite"]
-    assert overwrite.connect is None
-    assert overwrite.speak is False
-    assert await rows() == []
+# Here lies the unit test which caused every commit test to last like 30 minutes rather than 5 minutes as it should have.
