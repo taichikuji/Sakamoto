@@ -354,12 +354,13 @@ async def _top_results(
     variables = {
         "type": media_type,
         "perPage": TOP_RESULT_LIMIT,
-        "yearStart": year * 10000 - 1 if year is not None else None,
+        "yearStart": year * 10000 if year is not None else None,
         "yearEnd": (year + 1) * 10000 if year is not None else None,
         "genre": genre,
         "season": season,
         "format": media_format,
     }
+    variables = {name: value for name, value in variables.items() if value is not None}
     return _page_results(await _request(session, TOP_MEDIA, variables), "media")
 
 

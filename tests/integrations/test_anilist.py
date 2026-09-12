@@ -130,7 +130,7 @@ async def test_top_results_uses_anilist_filters_and_score_order(monkeypatch):
         {
             "type": "ANIME",
             "perPage": anilist.TOP_RESULT_LIMIT,
-            "yearStart": 19979999,
+            "yearStart": 19980000,
             "yearEnd": 19990000,
             "genre": "Action",
             "season": "SPRING",
@@ -139,6 +139,20 @@ async def test_top_results_uses_anilist_filters_and_score_order(monkeypatch):
     )
     assert "isAdult: false" in anilist.TOP_MEDIA
     assert "sort: [SCORE_DESC]" in anilist.TOP_MEDIA
+
+
+@pytest.mark.asyncio
+async def test_top_results_omits_unset_filters(monkeypatch):
+    request = AsyncMock(return_value={"data": {"Page": {"media": [ANIME]}}})
+    monkeypatch.setattr(anilist, "_request", request)
+    session = object()
+
+    assert await anilist._top_results(session, "ANIME") == [ANIME]
+    request.assert_awaited_once_with(
+        session,
+        anilist.TOP_MEDIA,
+        {"type": "ANIME", "perPage": anilist.TOP_RESULT_LIMIT},
+    )
 
 
 @pytest.mark.asyncio
