@@ -1,4 +1,5 @@
 import logging
+import time
 from os import environ
 from pathlib import Path
 
@@ -26,6 +27,7 @@ class Sakamoto(commands.Bot):
             case_insensitive=True,
             intents=intents,
         )
+        self.started_at = time.monotonic()
         self.session: ClientSession | None = None
         self.color = 0xFF3351
         self.db_path = "data/sakamoto.sqlite"

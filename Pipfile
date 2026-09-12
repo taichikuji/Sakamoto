@@ -12,7 +12,6 @@ ruff = "*"
 "discord.py" = {extras = ["voice"], version = "*"}
 "yt-dlp" = "*"
 aiohttp = "*"
-psutil = "*"
 aiosqlite = "*"
 
 [requires]

@@ -4,6 +4,8 @@ services:
     # image: ghcr.io/taichikuji/sakamoto
     restart: unless-stopped
     mem_limit: 512m
+    # Matching the memory limit disables container swap.
+    memswap_limit: 512m
     container_name: sakamoto
     environment:
       - TOKEN=${TOKEN}

@@ -17,9 +17,11 @@ def main_module(monkeypatch):
     sys.modules.pop("main", None)
 
 
-def test_bot_initializes_shared_resources(main_module):
+def test_bot_initializes_shared_resources(monkeypatch, main_module):
+    monkeypatch.setattr(main_module.time, "monotonic", lambda: 123.0)
     bot = main_module.Sakamoto()
 
+    assert bot.started_at == 123.0
     assert bot.session is None
     assert bot.color == 0xFF3351
     assert bot.db_path == "data/sakamoto.sqlite"
