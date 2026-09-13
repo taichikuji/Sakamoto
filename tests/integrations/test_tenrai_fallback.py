@@ -111,7 +111,7 @@ async def test_weekly_schedule_rejects_malformed_response(payload):
         ("MANGA", "manga", {"chapters": 380, "volumes": 42}),
     ],
 )
-async def test_search_media_normalizes_tenrai_records(media_type, resource, counts):
+async def test_search_catalogue_normalizes_tenrai_media(media_type, resource, counts):
     item = {
         "mal_id": 1,
         "url": f"https://myanimelist.net/{resource}/1/Cowboy_Bebop",
@@ -140,7 +140,7 @@ async def test_search_media_normalizes_tenrai_records(media_type, resource, coun
         get=MagicMock(return_value=DummyResponse({"data": [item]}))
     )
 
-    payload = await tenrai.search_media(session, "Cowboy Bebop", media_type, 5)
+    payload = await tenrai.search_catalogue(session, "Cowboy Bebop", media_type, 5)
     [result] = payload["data"]["Page"]["media"]
 
     assert result == {
@@ -173,7 +173,7 @@ async def test_search_media_normalizes_tenrai_records(media_type, resource, coun
 
 
 @pytest.mark.asyncio
-async def test_search_characters_normalizes_tenrai_records():
+async def test_search_catalogue_normalizes_tenrai_characters():
     item = {
         "mal_id": 40,
         "url": "https://myanimelist.net/character/40/Luffy_Monkey_D_",
@@ -189,7 +189,7 @@ async def test_search_characters_normalizes_tenrai_records():
         get=MagicMock(return_value=DummyResponse({"data": [item]}))
     )
 
-    payload = await tenrai.search_characters(session, "Luffy", 5)
+    payload = await tenrai.search_catalogue(session, "Luffy", "CHARACTER", 5)
 
     assert payload == {
         "data": {
@@ -221,10 +221,10 @@ async def test_search_characters_normalizes_tenrai_records():
 
 
 @pytest.mark.asyncio
-async def test_search_characters_tolerates_missing_optional_data():
+async def test_character_conversion_tolerates_missing_optional_data():
     session = SimpleNamespace(get=MagicMock(return_value=DummyResponse({"data": [{}]})))
 
-    payload = await tenrai.search_characters(session, "Unknown", 5)
+    payload = await tenrai.search_catalogue(session, "Unknown", "CHARACTER", 5)
     [result] = payload["data"]["Page"]["characters"]
 
     assert result["image"] is None
@@ -236,16 +236,126 @@ async def test_search_characters_tolerates_missing_optional_data():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload", [{"data": {}}, {"data": [None]}, None])
-async def test_search_characters_rejects_malformed_response(payload):
+async def test_character_conversion_rejects_malformed_response(payload):
     session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))
 
     with pytest.raises(tenrai.TenraiError, match="unexpected response"):
-        await tenrai.search_characters(session, "Luffy", 5)
+        await tenrai.search_catalogue(session, "Luffy", "CHARACTER", 5)
+
+
+@pytest.mark.asyncio
+async def test_search_catalogue_normalizes_tenrai_people_as_staff():
+    item = {
+        "url": "https://myanimelist.net/people/1870/Hayao_Miyazaki",
+        "images": {"jpg": {"image_url": "https://example.test/miyazaki.jpg"}},
+        "name": "Miyazaki, Hayao",
+        "alternate_names": ["宮崎 駿", "", 123],
+        "favorites": 74676,
+        "about": "Japanese animator and director.",
+    }
+    session = SimpleNamespace(
+        get=MagicMock(return_value=DummyResponse({"data": [item]}))
+    )
+
+    payload = await tenrai.search_catalogue(session, "Hayao Miyazaki", "STAFF", 5)
+
+    assert payload == {
+        "data": {
+            "Page": {
+                "staff": [
+                    {
+                        "_provider": "Tenrai",
+                        "name": {
+                            "full": "Miyazaki, Hayao",
+                            "native": None,
+                            "alternative": ["宮崎 駿"],
+                        },
+                        "siteUrl": (
+                            "https://myanimelist.net/people/1870/Hayao_Miyazaki"
+                        ),
+                        "description": "Japanese animator and director.",
+                        "image": {"large": "https://example.test/miyazaki.jpg"},
+                        "primaryOccupations": [],
+                        "languageV2": None,
+                        "favourites": 74676,
+                    }
+                ]
+            }
+        }
+    }
+    request = session.get.call_args
+    assert request.args == (f"{tenrai.TENRAI_URL}/people",)
+    assert request.kwargs["params"] == {"q": "Hayao Miyazaki", "limit": "5"}
+
+
+@pytest.mark.asyncio
+async def test_search_catalogue_normalizes_tenrai_producers_as_studios():
+    item = {
+        "url": "https://myanimelist.net/anime/producer/2/Kyoto_Animation",
+        "titles": [
+            {"type": "Japanese", "title": "京都アニメーション"},
+            {"type": "Default", "title": "Kyoto Animation"},
+            {"type": "Synonym", "title": "KyoAni"},
+        ],
+        "favorites": 40006,
+        "about": "Not part of AniList's Studio shape.",
+        "count": 141,
+    }
+    session = SimpleNamespace(
+        get=MagicMock(return_value=DummyResponse({"data": [item]}))
+    )
+
+    payload = await tenrai.search_catalogue(session, "Kyoto Animation", "STUDIO", 5)
+
+    assert payload == {
+        "data": {
+            "Page": {
+                "studios": [
+                    {
+                        "_provider": "Tenrai",
+                        "name": "Kyoto Animation",
+                        "siteUrl": (
+                            "https://myanimelist.net/anime/producer/2/Kyoto_Animation"
+                        ),
+                        "isAnimationStudio": None,
+                        "favourites": 40006,
+                    }
+                ]
+            }
+        }
+    }
+    request = session.get.call_args
+    assert request.args == (f"{tenrai.TENRAI_URL}/producers",)
+    assert request.kwargs["params"] == {"q": "Kyoto Animation", "limit": "5"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_type", "field"), [("STAFF", "staff"), ("STUDIO", "studios")]
+)
+async def test_new_conversions_tolerate_missing_optional_data(search_type, field):
+    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse({"data": [{}]})))
+
+    payload = await tenrai.search_catalogue(session, "Unknown", search_type, 5)
+    [result] = payload["data"]["Page"][field]
+
+    assert result["siteUrl"] is None
+    assert result["favourites"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", ["STAFF", "STUDIO"])
+@pytest.mark.parametrize("payload", [{"data": {}}, {"data": [None]}, None])
+async def test_new_conversions_reject_malformed_response(search_type, payload):
+    session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))
+
+    with pytest.raises(tenrai.TenraiError, match="unexpected response"):
+        await tenrai.search_catalogue(session, "Unknown", search_type, 5)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("score", [0, None, "unknown", 11, "inf"])
-async def test_search_media_tolerates_missing_optional_data(score):
+async def test_media_conversion_tolerates_missing_optional_data(score):
     session = SimpleNamespace(
         get=MagicMock(
             return_value=DummyResponse(
@@ -254,7 +364,7 @@ async def test_search_media_tolerates_missing_optional_data(score):
         )
     )
 
-    payload = await tenrai.search_media(session, "Berserk", "MANGA", 5)
+    payload = await tenrai.search_catalogue(session, "Berserk", "MANGA", 5)
     [result] = payload["data"]["Page"]["media"]
 
     assert result["averageScore"] is None
@@ -264,15 +374,15 @@ async def test_search_media_tolerates_missing_optional_data(score):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload", [{"data": {}}, {"data": [None]}, None])
-async def test_search_media_rejects_malformed_response(payload):
+async def test_media_conversion_rejects_malformed_response(payload):
     session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))
 
     with pytest.raises(tenrai.TenraiError, match="unexpected response"):
-        await tenrai.search_media(session, "Berserk", "MANGA", 5)
+        await tenrai.search_catalogue(session, "Berserk", "MANGA", 5)
 
 
 @pytest.mark.asyncio
-async def test_search_media_retries_one_rate_limit(monkeypatch):
+async def test_search_catalogue_retries_one_rate_limit(monkeypatch):
     session = SimpleNamespace(
         get=MagicMock(
             side_effect=[
@@ -284,26 +394,26 @@ async def test_search_media_retries_one_rate_limit(monkeypatch):
     wait = AsyncMock()
     monkeypatch.setattr(tenrai, "sleep", wait)
 
-    assert await tenrai.search_media(session, "Berserk", "MANGA", 5) == {
+    assert await tenrai.search_catalogue(session, "Berserk", "MANGA", 5) == {
         "data": {"Page": {"media": []}}
     }
     wait.assert_awaited_once_with(2)
 
 
 @pytest.mark.asyncio
-async def test_search_media_rejects_invalid_json():
+async def test_search_catalogue_rejects_invalid_json():
     session = SimpleNamespace(
         get=MagicMock(return_value=DummyResponse(json_error=ValueError()))
     )
 
     with pytest.raises(tenrai.TenraiError, match="invalid JSON"):
-        await tenrai.search_media(session, "Berserk", "MANGA", 5)
+        await tenrai.search_catalogue(session, "Berserk", "MANGA", 5)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [ClientError(), TimeoutError()])
-async def test_search_media_wraps_transport_errors(error):
+async def test_search_catalogue_wraps_transport_errors(error):
     session = SimpleNamespace(get=MagicMock(side_effect=error))
 
     with pytest.raises(tenrai.TenraiError, match="Could not reach Tenrai"):
-        await tenrai.search_media(session, "Berserk", "MANGA", 5)
+        await tenrai.search_catalogue(session, "Berserk", "MANGA", 5)
