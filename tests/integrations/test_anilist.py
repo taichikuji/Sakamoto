@@ -402,15 +402,29 @@ async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
     later = {**SCHEDULE_ENTRY, "airingAt": 1788886800}
     request = AsyncMock(
         side_effect=[
-            {"data": {"Page": {"airingSchedules": [SCHEDULE_ENTRY] * 49 + [adult]}}},
-            {"data": {"Page": {"airingSchedules": [later]}}},
+            {
+                "data": {
+                    "Page": {
+                        "pageInfo": {"hasNextPage": True},
+                        "airingSchedules": [SCHEDULE_ENTRY, adult],
+                    }
+                }
+            },
+            {
+                "data": {
+                    "Page": {
+                        "pageInfo": {"hasNextPage": False},
+                        "airingSchedules": [later],
+                    }
+                }
+            },
         ]
     )
     monkeypatch.setattr(anilist, "_request", request)
 
     results = await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
 
-    assert results == [SCHEDULE_ENTRY] * 49 + [later]
+    assert results == [SCHEDULE_ENTRY, later]
     assert [call.args[2] for call in request.await_args_list] == [
         {
             "page": 1,
@@ -425,6 +439,25 @@ async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
             "end": 1789344000,
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page_info", [None, {}, {"hasNextPage": "false"}])
+async def test_weekly_schedule_rejects_invalid_page_info(monkeypatch, page_info):
+    request = AsyncMock(
+        return_value={
+            "data": {
+                "Page": {
+                    "pageInfo": page_info,
+                    "airingSchedules": [SCHEDULE_ENTRY],
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(anilist, "_request", request)
+
+    with pytest.raises(anilist.AniListError, match="unexpected response"):
+        await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
 
 
 @pytest.mark.asyncio

@@ -155,6 +155,7 @@ query ($search: String!, $perPage: Int!) {
 WEEKLY_SCHEDULE = """
 query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
   Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage }
     airingSchedules(
       airingAt_greater: $start
       airingAt_lesser: $end
@@ -364,11 +365,21 @@ async def _weekly_schedule_results(
                 },
             )
             page_results = _page_results(payload, "airingSchedules")
+            data = payload.get("data")
+            page_data = data.get("Page") if isinstance(data, dict) else None
+            page_info = (
+                page_data.get("pageInfo") if isinstance(page_data, dict) else None
+            )
+            has_next_page = (
+                page_info.get("hasNextPage") if isinstance(page_info, dict) else None
+            )
+            if not isinstance(has_next_page, bool):
+                raise AniListError("AniList returned an unexpected response.")
             for result in page_results:
                 media = result.get("media")
                 if isinstance(media, dict) and media.get("isAdult") is not True:
                     results.append(result)
-            if len(page_results) < WEEKLY_QUERY_PAGE_SIZE:
+            if not has_next_page:
                 return results
             page += 1
     except AniListError as error:
