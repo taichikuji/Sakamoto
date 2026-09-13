@@ -135,6 +135,62 @@ def test_commands_are_grouped_under_anilist():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command_name", ["manga", "top", "weekly"])
+async def test_commands_reject_missing_http_session(command_name):
+    cog = _make_cog()
+    cog.bot.session = None
+    interaction = _make_interaction()
+    args = ("Berserk",) if command_name == "manga" else ()
+
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, *args)
+
+    interaction.response.send_message.assert_awaited_once_with(
+        ":x: The bot's HTTP session is not ready. Please try again later.",
+        ephemeral=True,
+    )
+    interaction.response.defer.assert_not_awaited()
+    assert interaction.command_failed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (
+            403,
+            ":x: AniList has temporarily disabled its API. Please try again later.",
+        ),
+        (503, ":x: AniList is unavailable. Please try again later."),
+    ],
+)
+@pytest.mark.parametrize(
+    ("command_name", "cached_method"),
+    [
+        ("manga", "_cached_search"),
+        ("top", "_cached_top"),
+        ("weekly", "_cached_weekly_schedule"),
+    ],
+)
+async def test_commands_report_shared_anilist_errors(
+    command_name, cached_method, status, message
+):
+    cog = _make_cog()
+    setattr(
+        cog,
+        cached_method,
+        AsyncMock(side_effect=anilist.AniListError("unavailable", status)),
+    )
+    interaction = _make_interaction()
+    args = ("Berserk",) if command_name == "manga" else ()
+
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, *args)
+
+    interaction.response.defer.assert_awaited_once_with()
+    interaction.followup.send.assert_awaited_once_with(message, ephemeral=True)
+    assert interaction.command_failed is True
+
+
+@pytest.mark.asyncio
 async def test_top_results_uses_anilist_filters_and_score_order(monkeypatch):
     request = AsyncMock(return_value={"data": {"Page": {"media": [ANIME]}}})
     monkeypatch.setattr(anilist, "_request", request)
