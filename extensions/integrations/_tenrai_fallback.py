@@ -7,13 +7,16 @@ response shape consumed by the shared parser.
 
 from asyncio import sleep
 from datetime import UTC, datetime, time, timedelta
+from math import isfinite
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 TENRAI_URL = "https://api.tenrai.org/v1"
+MAX_RETRY_AFTER_SECONDS = 30
 MediaType = Literal["ANIME", "MANGA"]
+SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO"]
 _WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -168,6 +171,78 @@ def _character_page(payload: dict[str, Any]) -> dict[str, Any]:
     return {"data": {"Page": {"characters": results}}}
 
 
+def _staff_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai people into the shared AniList Staff shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        alternate_names = item.get("alternate_names")
+        if not isinstance(alternate_names, list):
+            alternate_names = []
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "name": {
+                    "full": item.get("name"),
+                    "native": None,
+                    "alternative": [
+                        name
+                        for name in alternate_names
+                        if isinstance(name, str) and name
+                    ],
+                },
+                "siteUrl": item.get("url"),
+                "description": item.get("about"),
+                "image": _cover_image(item),
+                "primaryOccupations": [],
+                "languageV2": None,
+                "favourites": item.get("favorites"),
+            }
+        )
+    return {"data": {"Page": {"staff": results}}}
+
+
+def _studio_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai producers into the shared AniList Studio shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        titles = item.get("titles")
+        if not isinstance(titles, list):
+            titles = []
+        valid_titles = [
+            title
+            for title in titles
+            if isinstance(title, dict)
+            and isinstance(title.get("title"), str)
+            and title["title"]
+        ]
+        default_title = next(
+            (title for title in valid_titles if title.get("type") == "Default"),
+            valid_titles[0] if valid_titles else {},
+        )
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "name": default_title.get("title"),
+                "siteUrl": item.get("url"),
+                "isAnimationStudio": None,
+                "favourites": item.get("favorites"),
+            }
+        )
+    return {"data": {"Page": {"studios": results}}}
+
+
 async def _request(
     session: ClientSession, resource: str, params: dict[str, str]
 ) -> dict[str, Any]:
@@ -202,6 +277,8 @@ async def _request(
             delay = max(float(retry_after), 0)
         except TypeError, ValueError:
             delay = 1
+        if not isfinite(delay) or delay > MAX_RETRY_AFTER_SECONDS:
+            raise TenraiError("Tenrai returned an unsafe retry delay.", 429)
         await sleep(delay)
 
 
@@ -273,27 +350,24 @@ async def weekly_schedule(
         page += 1
 
 
-async def search_media(
+async def search_catalogue(
     session: ClientSession,
     query: str,
-    media_type: MediaType,
+    search_type: SearchType,
     limit: int,
 ) -> dict[str, Any]:
-    """Search Tenrai and translate its records into an AniList Page response."""
-    resource = media_type.lower()
-    payload = await _request(
-        session, resource, {"q": query, "limit": str(limit), "sfw": "true"}
-    )
-
-    return _media_page(payload)
-
-
-async def search_characters(
-    session: ClientSession, query: str, limit: int
-) -> dict[str, Any]:
-    """Search Tenrai and translate characters into an AniList Page response."""
-    payload = await _request(session, "characters", {"q": query, "limit": str(limit)})
-    return _character_page(payload)
+    """Search one Tenrai catalogue type and return an AniList-shaped Page."""
+    params = {"q": query, "limit": str(limit)}
+    if search_type in ("ANIME", "MANGA"):
+        resource, converter = search_type.lower(), _media_page
+        params["sfw"] = "true"
+    else:
+        resource, converter = {
+            "CHARACTER": ("characters", _character_page),
+            "STAFF": ("people", _staff_page),
+            "STUDIO": ("producers", _studio_page),
+        }[search_type]
+    return converter(await _request(session, resource, params))
 
 
 async def top_media(

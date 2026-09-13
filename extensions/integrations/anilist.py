@@ -21,8 +21,7 @@ from extensions.core.analytics import mark_app_command_failed
 
 # Tenrai owns fallback transport and errors; this module decides when to use it.
 from ._tenrai_fallback import TenraiError
-from ._tenrai_fallback import search_characters as search_tenrai_characters
-from ._tenrai_fallback import search_media as search_tenrai_media
+from ._tenrai_fallback import search_catalogue as search_tenrai_catalogue
 from ._tenrai_fallback import top_media as top_tenrai_media
 from ._tenrai_fallback import weekly_schedule as weekly_tenrai_schedule
 
@@ -33,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 ANILIST_URL = "https://graphql.anilist.co"
 MediaType = Literal["ANIME", "MANGA"]
-SearchType = Literal[MediaType, "CHARACTER", "USER"]
+SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO", "USER"]
 
 # ANILIST REQUEST POLICY
 # AniList is a shared, rate-limited service currently operating with reduced capacity.
@@ -48,6 +47,8 @@ SearchType = Literal[MediaType, "CHARACTER", "USER"]
 # feed autocomplete, the initial embed, and every pagination button without another
 # AniList request. Discord embeds are built last so the cache stays presentation-free.
 CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+FALLBACK_CACHE_TTL_SECONDS = 60 * 60
+TOP_CACHE_TTL_SECONDS = 6 * 60 * 60
 CACHE_LIMIT = 256
 DESCRIPTION_LIMIT = 500
 SEARCH_RESULT_LIMIT = 5
@@ -57,26 +58,35 @@ WEEKLY_CACHE_TTL_SECONDS = 60 * 60
 WEEKLY_QUERY_PAGE_SIZE = 50
 WEEKLY_PAGE_SIZE = 25
 
-MEDIA_SEARCH = """
+MEDIA_FIELDS = """
+fragment MediaFields on Media {
+  title { romaji english native }
+  siteUrl
+  description(asHtml: false)
+  coverImage { large }
+  bannerImage
+  format
+  status
+  episodes
+  chapters
+  volumes
+  averageScore
+  genres
+}
+"""
+
+MEDIA_SEARCH = (
+    """
 query ($search: String!, $type: MediaType!, $perPage: Int!) {
   Page(page: 1, perPage: $perPage) {
     media(search: $search, type: $type, isAdult: false) {
-      title { romaji english native }
-      siteUrl
-      description(asHtml: false)
-      coverImage { large }
-      bannerImage
-      format
-      status
-      episodes
-      chapters
-      volumes
-      averageScore
-      genres
+      ...MediaFields
     }
   }
 }
 """
+    + MEDIA_FIELDS
+)
 
 CHARACTER_SEARCH = """
 query ($search: String!, $perPage: Int!) {
@@ -88,6 +98,35 @@ query ($search: String!, $perPage: Int!) {
       image { large }
       gender
       age
+      favourites
+    }
+  }
+}
+"""
+
+STAFF_SEARCH = """
+query ($search: String!, $perPage: Int!) {
+  Page(page: 1, perPage: $perPage) {
+    staff(search: $search) {
+      name { full native alternative }
+      siteUrl
+      description(asHtml: false)
+      image { large }
+      primaryOccupations
+      languageV2
+      favourites
+    }
+  }
+}
+"""
+
+STUDIO_SEARCH = """
+query ($search: String!, $perPage: Int!) {
+  Page(page: 1, perPage: $perPage) {
+    studios(search: $search) {
+      name
+      siteUrl
+      isAnimationStudio
       favourites
     }
   }
@@ -116,6 +155,7 @@ query ($search: String!, $perPage: Int!) {
 WEEKLY_SCHEDULE = """
 query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
   Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage }
     airingSchedules(
       airingAt_greater: $start
       airingAt_lesser: $end
@@ -132,7 +172,8 @@ query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
 }
 """
 
-TOP_MEDIA = """
+TOP_MEDIA = (
+    """
 query (
   $type: MediaType!
   $perPage: Int!
@@ -153,22 +194,13 @@ query (
       isAdult: false
       sort: [SCORE_DESC]
     ) {
-      title { romaji english native }
-      siteUrl
-      description(asHtml: false)
-      coverImage { large }
-      bannerImage
-      format
-      status
-      episodes
-      chapters
-      volumes
-      averageScore
-      genres
+      ...MediaFields
     }
   }
 }
 """
+    + MEDIA_FIELDS
+)
 
 
 class AniListError(Exception):
@@ -281,13 +313,16 @@ async def _search_results(
     # AniList permits only one result collection in each Page query. Keep the documents
     # distinct while sharing their transport and response parsing.
     variables: dict[str, Any] = {"search": query, "perPage": limit}
-    if search_type == "CHARACTER":
-        document, result_field = CHARACTER_SEARCH, "characters"
-    elif search_type == "USER":
-        document, result_field = USER_SEARCH, "users"
-    else:
+    if search_type in ("ANIME", "MANGA"):
         document, result_field = MEDIA_SEARCH, "media"
         variables["type"] = search_type
+    else:
+        document, result_field = {
+            "CHARACTER": (CHARACTER_SEARCH, "characters"),
+            "STAFF": (STAFF_SEARCH, "staff"),
+            "STUDIO": (STUDIO_SEARCH, "studios"),
+            "USER": (USER_SEARCH, "users"),
+        }[search_type]
     try:
         payload = await _request(session, document, variables)
     except AniListError as error:
@@ -299,10 +334,7 @@ async def _search_results(
             error.status or "transport",
         )
         try:
-            if search_type == "CHARACTER":
-                payload = await search_tenrai_characters(session, query, limit)
-            else:
-                payload = await search_tenrai_media(session, query, search_type, limit)
+            payload = await search_tenrai_catalogue(session, query, search_type, limit)
         except TenraiError as fallback_error:
             logger.warning(
                 "Tenrai %s fallback failed with status %s",
@@ -333,11 +365,21 @@ async def _weekly_schedule_results(
                 },
             )
             page_results = _page_results(payload, "airingSchedules")
+            data = payload.get("data")
+            page_data = data.get("Page") if isinstance(data, dict) else None
+            page_info = (
+                page_data.get("pageInfo") if isinstance(page_data, dict) else None
+            )
+            has_next_page = (
+                page_info.get("hasNextPage") if isinstance(page_info, dict) else None
+            )
+            if not isinstance(has_next_page, bool):
+                raise AniListError("AniList returned an unexpected response.")
             for result in page_results:
                 media = result.get("media")
                 if isinstance(media, dict) and media.get("isAdult") is not True:
                     results.append(result)
-            if len(page_results) < WEEKLY_QUERY_PAGE_SIZE:
+            if not has_next_page:
                 return results
             page += 1
     except AniListError as error:
@@ -397,22 +439,50 @@ def _label(value: Any) -> str:
 
 
 def _result_names(result: dict[str, Any], search_type: SearchType) -> list[str]:
-    if search_type == "USER":
+    if search_type in ("STUDIO", "USER"):
         name = result.get("name")
         return [str(name).strip()] if name else []
-    names = result.get("name" if search_type == "CHARACTER" else "title")
+    names = result.get("name" if search_type in ("CHARACTER", "STAFF") else "title")
     if not isinstance(names, dict):
         return []
     fields = (
         ("full", "native")
-        if search_type == "CHARACTER"
+        if search_type in ("CHARACTER", "STAFF")
         else (
             "romaji",
             "english",
             "native",
         )
     )
-    return [str(names[field]).strip() for field in fields if names.get(field)]
+    result_names = [str(names[field]).strip() for field in fields if names.get(field)]
+    alternatives = names.get("alternative")
+    if search_type == "STAFF" and isinstance(alternatives, list):
+        result_names.extend(
+            name.strip() for name in alternatives if isinstance(name, str) and name
+        )
+    return result_names
+
+
+def _set_provider_author(embed: Embed, result: dict[str, Any], *, cached: bool) -> None:
+    provider = "Tenrai" if result.get("_provider") == "Tenrai" else "AniList"
+    author = f"{provider} • Cache Hit" if cached else provider
+    embed.set_author(
+        name=author,
+        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    )
+
+
+async def _send_anilist_error(
+    interaction: Interaction, operation: str, error: AniListError
+) -> None:
+    logger.warning("AniList %s failed with status %s", operation, error.status)
+    message = (
+        ":x: AniList has temporarily disabled its API. Please try again later."
+        if error.status == 403
+        else ":x: AniList is unavailable. Please try again later."
+    )
+    await interaction.followup.send(message, ephemeral=True)
+    mark_app_command_failed(interaction)
 
 
 def media_embed(
@@ -472,13 +542,7 @@ def media_embed(
     banner_url = media.get("bannerImage")
     if isinstance(banner_url, str):
         embed.set_image(url=banner_url)
-    # The normalized provider marker controls attribution in the shared embed.
-    provider = "Tenrai" if media.get("_provider") == "Tenrai" else "AniList"
-    author = f"{provider} • Cache Hit" if cached else provider
-    embed.set_author(
-        name=author,
-        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
-    )
+    _set_provider_author(embed, media, cached=cached)
     return embed
 
 
@@ -519,12 +583,88 @@ def character_embed(
     image_url = image.get("large") if isinstance(image, dict) else None
     if isinstance(image_url, str):
         embed.set_thumbnail(url=image_url)
-    provider = "Tenrai" if character.get("_provider") == "Tenrai" else "AniList"
-    author = f"{provider} • Cache Hit" if cached else provider
-    embed.set_author(
-        name=author,
-        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    _set_provider_author(embed, character, cached=cached)
+    return embed
+
+
+def staff_embed(staff: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
+    """Build a compact, linked embed for one staff result."""
+    names = staff.get("name")
+    if not isinstance(names, dict):
+        names = {}
+    title = names.get("full") or names.get("native") or "Unknown staff member"
+    site_url = staff.get("siteUrl")
+    embed = Embed(
+        title=str(title)[:256],
+        url=site_url if isinstance(site_url, str) else None,
+        description=_clean_description(
+            staff.get("description"), "No biography available."
+        ),
+        color=color,
     )
+
+    occupations = staff.get("primaryOccupations")
+    occupation_text = (
+        ", ".join(
+            occupation
+            for occupation in occupations
+            if isinstance(occupation, str) and occupation
+        )[:1024]
+        if isinstance(occupations, list)
+        else ""
+    )
+    favourites = staff.get("favourites")
+    metrics = (
+        (":tools: Occupations", occupation_text or "—"),
+        (":speech_balloon: Language", str(staff.get("languageV2") or "—")),
+        (
+            ":heart: Favourites",
+            f"{favourites:,}" if isinstance(favourites, int) else "—",
+        ),
+    )
+    for name, value in metrics:
+        embed.add_field(name=name, value=value, inline=True)
+
+    native_name = names.get("native")
+    footer = "Staff"
+    if isinstance(native_name, str) and native_name != title:
+        footer = f"{footer} • {native_name}"
+    embed.set_footer(text=footer[:2048])
+
+    image = staff.get("image")
+    image_url = image.get("large") if isinstance(image, dict) else None
+    if isinstance(image_url, str):
+        embed.set_thumbnail(url=image_url)
+    _set_provider_author(embed, staff, cached=cached)
+    return embed
+
+
+def studio_embed(studio: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
+    """Build a compact, linked embed for one studio result."""
+    title = str(studio.get("name") or "Unknown studio")
+    site_url = studio.get("siteUrl")
+    embed = Embed(
+        title=title[:256],
+        url=site_url if isinstance(site_url, str) else None,
+        color=color,
+    )
+    animation_studio = studio.get("isAnimationStudio")
+    studio_type = (
+        "Animation studio"
+        if animation_studio is True
+        else "Production company"
+        if animation_studio is False
+        else "—"
+    )
+    favourites = studio.get("favourites")
+    embed.add_field(name=":office: Type", value=studio_type, inline=True)
+    embed.add_field(
+        name=":heart: Favourites",
+        value=f"{favourites:,}" if isinstance(favourites, int) else "—",
+        inline=True,
+    )
+    embed.set_footer(text="Studio")
+    _set_provider_author(embed, studio, cached=cached)
     return embed
 
 
@@ -577,8 +717,7 @@ def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Emb
     banner_url = user.get("bannerImage")
     if isinstance(banner_url, str):
         embed.set_image(url=banner_url)
-    author = "AniList • Cache Hit" if cached else "AniList"
-    embed.set_author(name=author, url="https://anilist.co/")
+    _set_provider_author(embed, user, cached=cached)
     return embed
 
 
@@ -587,11 +726,13 @@ def result_embed(
 ) -> Embed:
     if search_type == "USER":
         return user_embed(result, color, cached=cached)
-    return (
-        character_embed(result, color, cached=cached)
-        if search_type == "CHARACTER"
-        else media_embed(result, search_type, color, cached=cached)
-    )
+    if search_type == "CHARACTER":
+        return character_embed(result, color, cached=cached)
+    if search_type == "STAFF":
+        return staff_embed(result, color, cached=cached)
+    if search_type == "STUDIO":
+        return studio_embed(result, color, cached=cached)
+    return media_embed(result, search_type, color, cached=cached)
 
 
 def _schedule_line(entry: dict[str, Any]) -> str:
@@ -632,10 +773,6 @@ def weekly_embeds(
     ]
 
     provider = "Tenrai" if entries[0].get("_provider") == "Tenrai" else "AniList"
-    author = f"{provider} • Cache Hit" if cached else provider
-    author_url = (
-        "https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/"
-    )
     pages: list[Embed] = []
     for index, description in enumerate(descriptions, start=1):
         embed = Embed(
@@ -643,7 +780,7 @@ def weekly_embeds(
             description=description,
             color=color,
         )
-        embed.set_author(name=author, url=author_url)
+        _set_provider_author(embed, entries[0], cached=cached)
         detail = (
             "Tenrai broadcast times • Episode numbers unavailable"
             if provider == "Tenrai"
@@ -767,6 +904,16 @@ class AniListCog(
         self.weekly_cache: tuple[int, float, list[dict[str, Any]]] | None = None
         self.weekly_lock = Lock()
 
+    async def _http_session_ready(self, interaction: Interaction) -> bool:
+        if self.bot.session is not None:
+            return True
+        await interaction.response.send_message(
+            ":x: The bot's HTTP session is not ready. Please try again later.",
+            ephemeral=True,
+        )
+        mark_app_command_failed(interaction)
+        return False
+
     def _store_cache(
         self,
         key: tuple[str, str],
@@ -800,7 +947,12 @@ class AniListCog(
             if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
                 return cached[1], True
             result = await _search_results(self.bot.session, query, search_type)
-            self._store_cache(key, result)
+            expires_at = (
+                monotonic() + FALLBACK_CACHE_TTL_SECONDS
+                if any(item.get("_provider") == "Tenrai" for item in result)
+                else None
+            )
+            self._store_cache(key, result, expires_at=expires_at)
             return result, False
 
     async def _cached_weekly_schedule(
@@ -879,7 +1031,9 @@ class AniListCog(
                         fallback_error.status,
                     )
                     raise error from fallback_error
-            self._store_cache(key, results)
+            self._store_cache(
+                key, results, expires_at=monotonic() + TOP_CACHE_TTL_SECONDS
+            )
             return results, False
 
     async def search_query_autocomplete(
@@ -891,6 +1045,8 @@ class AniListCog(
             "anime": "ANIME",
             "manga": "MANGA",
             "character": "CHARACTER",
+            "staff": "STAFF",
+            "studio": "STUDIO",
             "user": "USER",
         }.get(command_name)
         if (
@@ -904,6 +1060,7 @@ class AniListCog(
         async with self.autocomplete_lock:
             now = monotonic()
             cached_query = ""
+            cached_expires_at: float | None = None
             results: list[dict[str, Any]] | None = None
             for (result_type, result_query), (
                 expires_at,
@@ -916,6 +1073,7 @@ class AniListCog(
                     and len(result_query) > len(cached_query)
                 ):
                     cached_query = result_query
+                    cached_expires_at = expires_at
                     results = cached
 
             matches = [
@@ -936,8 +1094,12 @@ class AniListCog(
                         error.status,
                     )
                     return []
+                cached = self.search_cache.get((search_type, normalized))
+                cached_expires_at = cached[0] if cached else None
 
-            self._store_cache((search_type, normalized), matches)
+            self._store_cache(
+                (search_type, normalized), matches, expires_at=cached_expires_at
+            )
             choices: list[app_commands.Choice[str]] = []
             seen: set[str] = set()
             for result in matches:
@@ -959,7 +1121,9 @@ class AniListCog(
                 # A selected suggestion should resolve to its exact result from cache,
                 # not cause a second search or reopen the broader suggestion set.
                 self._store_cache(
-                    (search_type, " ".join(name.casefold().split())), [result]
+                    (search_type, " ".join(name.casefold().split())),
+                    [result],
+                    expires_at=cached_expires_at,
                 )
                 if len(choices) == SEARCH_RESULT_LIMIT:
                     break
@@ -984,6 +1148,20 @@ class AniListCog(
     @app_commands.autocomplete(query=search_query_autocomplete)
     async def character(self, interaction: Interaction, query: str) -> None:
         await self._search_command(interaction, query, "CHARACTER")
+
+    @app_commands.command(
+        name="staff", description="Search AniList for a staff member."
+    )
+    @app_commands.describe(query="Staff member name to search for.")
+    @app_commands.autocomplete(query=search_query_autocomplete)
+    async def staff(self, interaction: Interaction, query: str) -> None:
+        await self._search_command(interaction, query, "STAFF")
+
+    @app_commands.command(name="studio", description="Search AniList for a studio.")
+    @app_commands.describe(query="Studio name to search for.")
+    @app_commands.autocomplete(query=search_query_autocomplete)
+    async def studio(self, interaction: Interaction, query: str) -> None:
+        await self._search_command(interaction, query, "STUDIO")
 
     @app_commands.command(name="user", description="Search for an AniList user.")
     @app_commands.describe(query="AniList username to search for.")
@@ -1058,12 +1236,7 @@ class AniListCog(
         season: str | None = None,
         format: str | None = None,
     ) -> None:
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         selected_type: MediaType = "MANGA" if media_type == "MANGA" else "ANIME"
@@ -1077,14 +1250,7 @@ class AniListCog(
                 media_format=format,
             )
         except AniListError as error:
-            logger.warning("AniList top ranking failed with status %s", error.status)
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, "top ranking", error)
             return
 
         if not results:
@@ -1118,12 +1284,7 @@ class AniListCog(
         name="weekly", description="Show anime airing during the current week."
     )
     async def weekly(self, interaction: Interaction) -> None:
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         week_start, week_end = _week_bounds()
@@ -1131,16 +1292,7 @@ class AniListCog(
         try:
             entries, cached = await self._cached_weekly_schedule(week_start, week_end)
         except AniListError as error:
-            logger.warning(
-                "AniList weekly schedule failed with status %s", error.status
-            )
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, "weekly schedule", error)
             return
 
         pages = weekly_embeds(entries, self.bot.color, cached=cached)
@@ -1171,28 +1323,14 @@ class AniListCog(
             )
             mark_app_command_failed(interaction)
             return
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         await interaction.response.defer()
         try:
             result, cached = await self._cached_search(query, search_type)
         except AniListError as error:
-            logger.warning(
-                "AniList %s search failed with status %s", label, error.status
-            )
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, f"{label} search", error)
             return
 
         if not result:

@@ -75,6 +75,27 @@ USER = {
     },
 }
 
+STAFF = {
+    "name": {
+        "full": "Hayao Miyazaki",
+        "native": "宮崎駿",
+        "alternative": ["Miyazaki Hayao"],
+    },
+    "siteUrl": "https://anilist.co/staff/96870",
+    "description": "Japanese animator and director.",
+    "image": {"large": "https://example.test/miyazaki.jpg"},
+    "primaryOccupations": ["Director", "Animator", "Writer"],
+    "languageV2": "Japanese",
+    "favourites": 12366,
+}
+
+STUDIO = {
+    "name": "Kyoto Animation",
+    "siteUrl": "https://anilist.co/studio/2",
+    "isAnimationStudio": True,
+    "favourites": 24036,
+}
+
 SCHEDULE_ENTRY = {
     "airingAt": 1788800400,
     "episode": 12,
@@ -105,10 +126,68 @@ def test_commands_are_grouped_under_anilist():
         ("anime", "anilist anime"),
         ("manga", "anilist manga"),
         ("character", "anilist character"),
+        ("staff", "anilist staff"),
+        ("studio", "anilist studio"),
         ("user", "anilist user"),
         ("top", "anilist top"),
         ("weekly", "anilist weekly"),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command_name", ["manga", "top", "weekly"])
+async def test_commands_reject_missing_http_session(command_name):
+    cog = _make_cog()
+    cog.bot.session = None
+    interaction = _make_interaction()
+    args = ("Berserk",) if command_name == "manga" else ()
+
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, *args)
+
+    interaction.response.send_message.assert_awaited_once_with(
+        ":x: The bot's HTTP session is not ready. Please try again later.",
+        ephemeral=True,
+    )
+    interaction.response.defer.assert_not_awaited()
+    assert interaction.command_failed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (
+            403,
+            ":x: AniList has temporarily disabled its API. Please try again later.",
+        ),
+        (503, ":x: AniList is unavailable. Please try again later."),
+    ],
+)
+@pytest.mark.parametrize(
+    ("command_name", "cached_method"),
+    [
+        ("manga", "_cached_search"),
+        ("top", "_cached_top"),
+        ("weekly", "_cached_weekly_schedule"),
+    ],
+)
+async def test_commands_report_shared_anilist_errors(
+    command_name, cached_method, status, message
+):
+    cog = _make_cog()
+    setattr(
+        cog,
+        cached_method,
+        AsyncMock(side_effect=anilist.AniListError("unavailable", status)),
+    )
+    interaction = _make_interaction()
+    args = ("Berserk",) if command_name == "manga" else ()
+
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, *args)
+
+    interaction.response.defer.assert_awaited_once_with()
+    interaction.followup.send.assert_awaited_once_with(message, ephemeral=True)
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio
@@ -273,18 +352,23 @@ async def test_top_season_without_year_uses_current_year(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_top_cache_normalizes_equivalent_genres(monkeypatch):
+async def test_top_cache_normalizes_equivalent_genres_and_expires(monkeypatch):
+    now = [0.0]
     ranking = AsyncMock(return_value=[ANIME])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
     monkeypatch.setattr(anilist, "_top_results", ranking)
     cog = _make_cog()
 
     assert await cog._cached_top("ANIME", genre="Action") == ([ANIME], False)
     assert await cog._cached_top("ANIME", genre="  action  ") == ([ANIME], True)
-    ranking.assert_awaited_once_with(
+    now[0] = anilist.TOP_CACHE_TTL_SECONDS + 1
+    assert await cog._cached_top("ANIME", genre="action") == ([ANIME], False)
+    assert ranking.await_count == 2
+    ranking.assert_awaited_with(
         cog.bot.session,
         "ANIME",
         year=None,
-        genre="Action",
+        genre="action",
         season=None,
         media_format=None,
     )
@@ -374,15 +458,29 @@ async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
     later = {**SCHEDULE_ENTRY, "airingAt": 1788886800}
     request = AsyncMock(
         side_effect=[
-            {"data": {"Page": {"airingSchedules": [SCHEDULE_ENTRY] * 49 + [adult]}}},
-            {"data": {"Page": {"airingSchedules": [later]}}},
+            {
+                "data": {
+                    "Page": {
+                        "pageInfo": {"hasNextPage": True},
+                        "airingSchedules": [SCHEDULE_ENTRY, adult],
+                    }
+                }
+            },
+            {
+                "data": {
+                    "Page": {
+                        "pageInfo": {"hasNextPage": False},
+                        "airingSchedules": [later],
+                    }
+                }
+            },
         ]
     )
     monkeypatch.setattr(anilist, "_request", request)
 
     results = await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
 
-    assert results == [SCHEDULE_ENTRY] * 49 + [later]
+    assert results == [SCHEDULE_ENTRY, later]
     assert [call.args[2] for call in request.await_args_list] == [
         {
             "page": 1,
@@ -397,6 +495,25 @@ async def test_weekly_schedule_fetches_all_pages_and_filters_adult_media(
             "end": 1789344000,
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page_info", [None, {}, {"hasNextPage": "false"}])
+async def test_weekly_schedule_rejects_invalid_page_info(monkeypatch, page_info):
+    request = AsyncMock(
+        return_value={
+            "data": {
+                "Page": {
+                    "pageInfo": page_info,
+                    "airingSchedules": [SCHEDULE_ENTRY],
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(anilist, "_request", request)
+
+    with pytest.raises(anilist.AniListError, match="unexpected response"):
+        await anilist._weekly_schedule_results(object(), 1788739200, 1789344000)
 
 
 @pytest.mark.asyncio
@@ -541,6 +658,20 @@ async def test_weekly_cache_reuses_results_within_the_same_week(monkeypatch):
             {"search": "Berserk", "perPage": 3},
             USER,
         ),
+        (
+            "STAFF",
+            anilist.STAFF_SEARCH,
+            "staff",
+            {"search": "Berserk", "perPage": 3},
+            STAFF,
+        ),
+        (
+            "STUDIO",
+            anilist.STUDIO_SEARCH,
+            "studios",
+            {"search": "Berserk", "perPage": 3},
+            STUDIO,
+        ),
     ],
 )
 async def test_search_results_selects_document_variables_and_collection(
@@ -559,25 +690,49 @@ async def test_search_results_selects_document_variables_and_collection(
     ("status", "transport"),
     [(403, False), (429, False), (503, False), (None, True)],
 )
+@pytest.mark.parametrize(
+    ("search_type", "result_field", "result"),
+    [
+        ("ANIME", "media", ANIME),
+        ("MANGA", "media", MANGA),
+        ("CHARACTER", "characters", CHARACTER),
+        ("STAFF", "staff", STAFF),
+        ("STUDIO", "studios", STUDIO),
+    ],
+)
 async def test_anilist_unavailability_falls_back_to_tenrai_and_caches_result(
-    monkeypatch, status, transport
+    monkeypatch, status, transport, search_type, result_field, result
 ):
-    fallback = {**MANGA, "_provider": "Tenrai"}
+    fallback = {**result, "_provider": "Tenrai"}
     request = AsyncMock(
         side_effect=anilist.AniListError("unavailable", status, unavailable=transport)
     )
-    tenrai = AsyncMock(return_value={"data": {"Page": {"media": [fallback]}}})
+    tenrai = AsyncMock(return_value={"data": {"Page": {result_field: [fallback]}}})
     monkeypatch.setattr(anilist, "_request", request)
-    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai)
+    monkeypatch.setattr(anilist, "search_tenrai_catalogue", tenrai)
     cog = _make_cog()
 
-    assert await cog._cached_search("Berserk", "MANGA") == ([fallback], False)
-    assert await cog._cached_search(" berserk ", "MANGA") == ([fallback], True)
+    assert await cog._cached_search("Search", search_type) == ([fallback], False)
+    assert await cog._cached_search(" search ", search_type) == ([fallback], True)
     request.assert_awaited_once()
-    tenrai.assert_awaited_once_with(cog.bot.session, "Berserk", "MANGA", 5)
-    embed = anilist.media_embed(fallback, "MANGA", 0x123456, cached=True)
-    assert embed.author.name == "Tenrai • Cache Hit"
-    assert embed.author.url == "https://tenrai.org/"
+    tenrai.assert_awaited_once_with(cog.bot.session, "Search", search_type, 5)
+
+
+@pytest.mark.asyncio
+async def test_tenrai_search_cache_expires_earlier(monkeypatch):
+    now = [0.0]
+    fallback = {**ANIME, "_provider": "Tenrai"}
+    search = AsyncMock(side_effect=[[fallback], [ANIME]])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
+    monkeypatch.setattr(anilist, "_search_results", search)
+    cog = _make_cog()
+
+    assert await cog._cached_search("Cowboy Bebop", "ANIME") == ([fallback], False)
+    now[0] = anilist.FALLBACK_CACHE_TTL_SECONDS - 1
+    assert await cog._cached_search("cowboy bebop", "ANIME") == ([fallback], True)
+    now[0] = anilist.FALLBACK_CACHE_TTL_SECONDS + 1
+    assert await cog._cached_search("cowboy bebop", "ANIME") == ([ANIME], False)
+    assert search.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -592,7 +747,7 @@ async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch)
     request = AsyncMock(side_effect=anilist.AniListError("disabled", 403))
     tenrai = AsyncMock(return_value={"data": {"Page": {"characters": [fallback]}}})
     monkeypatch.setattr(anilist, "_request", request)
-    monkeypatch.setattr(anilist, "search_tenrai_characters", tenrai)
+    monkeypatch.setattr(anilist, "search_tenrai_catalogue", tenrai)
     cog = _make_cog()
     interaction = SimpleNamespace(command=SimpleNamespace(name="character"))
 
@@ -604,7 +759,7 @@ async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch)
     ]
     assert (result, cached) == ([fallback], True)
     request.assert_awaited_once()
-    tenrai.assert_awaited_once_with(cog.bot.session, "Luffy", 5)
+    tenrai.assert_awaited_once_with(cog.bot.session, "Luffy", "CHARACTER", 5)
     embed = anilist.character_embed(fallback, 0x123456, cached=True)
     assert [(field.name, field.value) for field in embed.fields[:2]] == [
         (":transgender_symbol: Gender", "—"),
@@ -627,15 +782,12 @@ async def test_tenrai_fallback_excludes_bad_requests_and_user_lookup(
         "_request",
         AsyncMock(side_effect=anilist.AniListError("unavailable", status)),
     )
-    tenrai_media = AsyncMock()
-    tenrai_characters = AsyncMock()
-    monkeypatch.setattr(anilist, "search_tenrai_media", tenrai_media)
-    monkeypatch.setattr(anilist, "search_tenrai_characters", tenrai_characters)
+    tenrai = AsyncMock()
+    monkeypatch.setattr(anilist, "search_tenrai_catalogue", tenrai)
 
     with pytest.raises(anilist.AniListError):
         await anilist._search_results(object(), "Berserk", search_type)
-    tenrai_media.assert_not_awaited()
-    tenrai_characters.assert_not_awaited()
+    tenrai.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -652,17 +804,14 @@ async def test_request_marks_transport_failures_unavailable(transport_error):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("search_type", "fallback_name"),
-    [("MANGA", "search_tenrai_media"), ("CHARACTER", "search_tenrai_characters")],
+    "search_type", ["ANIME", "MANGA", "CHARACTER", "STAFF", "STUDIO"]
 )
-async def test_failed_tenrai_fallback_preserves_anilist_error(
-    monkeypatch, search_type, fallback_name
-):
+async def test_failed_tenrai_fallback_preserves_anilist_error(monkeypatch, search_type):
     original = anilist.AniListError("disabled", 403)
     monkeypatch.setattr(anilist, "_request", AsyncMock(side_effect=original))
     monkeypatch.setattr(
         anilist,
-        fallback_name,
+        "search_tenrai_catalogue",
         AsyncMock(side_effect=tenrai_fallback.TenraiError("unavailable", 503)),
     )
 
@@ -752,6 +901,57 @@ def test_character_embed_uses_character_details():
     assert embed.author.name == "AniList • Cache Hit"
 
 
+def test_staff_embed_uses_staff_details_and_tenrai_gaps():
+    embed = anilist.staff_embed(STAFF, 0x123456, cached=True)
+
+    assert embed.title == "Hayao Miyazaki"
+    assert embed.url == STAFF["siteUrl"]
+    assert embed.description == "Japanese animator and director."
+    assert [(field.name, field.value) for field in embed.fields] == [
+        (":tools: Occupations", "Director, Animator, Writer"),
+        (":speech_balloon: Language", "Japanese"),
+        (":heart: Favourites", "12,366"),
+    ]
+    assert embed.footer.text == "Staff • 宮崎駿"
+    assert embed.thumbnail.url == STAFF["image"]["large"]
+    assert embed.author.name == "AniList • Cache Hit"
+
+    fallback = anilist.staff_embed(
+        {
+            **STAFF,
+            "_provider": "Tenrai",
+            "name": {**STAFF["name"], "native": None},
+            "primaryOccupations": [],
+            "languageV2": None,
+        },
+        0x123456,
+    )
+    assert [field.value for field in fallback.fields[:2]] == ["—", "—"]
+    assert fallback.footer.text == "Staff"
+    assert fallback.author.name == "Tenrai"
+    assert fallback.author.url == "https://tenrai.org/"
+
+
+def test_studio_embed_uses_studio_details_and_tenrai_gap():
+    embed = anilist.studio_embed(STUDIO, 0x123456, cached=True)
+
+    assert embed.title == "Kyoto Animation"
+    assert embed.url == STUDIO["siteUrl"]
+    assert [(field.name, field.value) for field in embed.fields] == [
+        (":office: Type", "Animation studio"),
+        (":heart: Favourites", "24,036"),
+    ]
+    assert embed.footer.text == "Studio"
+    assert embed.author.name == "AniList • Cache Hit"
+
+    fallback = anilist.studio_embed(
+        {**STUDIO, "_provider": "Tenrai", "isAnimationStudio": None},
+        0x123456,
+    )
+    assert fallback.fields[0].value == "—"
+    assert fallback.author.name == "Tenrai"
+
+
 def test_user_embed_uses_public_profile_details():
     embed = anilist.user_embed(USER, 0x123456, cached=True)
 
@@ -799,14 +999,42 @@ async def test_character_command_uses_cached_search_path():
 
 
 @pytest.mark.asyncio
-async def test_character_command_rejects_empty_name():
+@pytest.mark.parametrize(
+    ("command_name", "search_type", "result", "query", "title"),
+    [
+        ("staff", "STAFF", STAFF, " Hayao Miyazaki ", "Hayao Miyazaki"),
+        ("studio", "STUDIO", STUDIO, " Kyoto Animation ", "Kyoto Animation"),
+    ],
+)
+async def test_new_commands_use_shared_search_path(
+    command_name, search_type, result, query, title
+):
+    cog = _make_cog()
+    cog._cached_search = AsyncMock(return_value=([result], False))
+    interaction = _make_interaction()
+
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, query)
+
+    interaction.response.defer.assert_awaited_once_with()
+    cog._cached_search.assert_awaited_once_with(query.strip(), search_type)
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert embed.title == title
+    assert embed.author.name == "AniList"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command_name", "label"),
+    [("character", "character"), ("staff", "staff"), ("studio", "studio")],
+)
+async def test_named_entity_commands_reject_empty_name(command_name, label):
     cog = _make_cog()
     interaction = _make_interaction()
 
-    await anilist.AniListCog.character.callback(cog, interaction, "   ")
+    await getattr(anilist.AniListCog, command_name).callback(cog, interaction, "   ")
 
     interaction.response.send_message.assert_awaited_once_with(
-        ":x: Enter a character name to search for.", ephemeral=True
+        f":x: Enter a {label} name to search for.", ephemeral=True
     )
     interaction.response.defer.assert_not_awaited()
     assert interaction.command_failed is True
@@ -862,6 +1090,7 @@ async def test_pagination_rejects_other_users():
 
 @pytest.mark.asyncio
 async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkeypatch):
+    now = [100.0]
     second = {
         **MANGA,
         "title": {
@@ -871,10 +1100,13 @@ async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkey
     }
     cog = _make_cog()
     search = AsyncMock(return_value=[MANGA, second])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
     monkeypatch.setattr(anilist, "_search_results", search)
     interaction = SimpleNamespace(command=SimpleNamespace(name="manga"))
 
     choices = await cog.search_query_autocomplete(interaction, "ber")
+    source_expiry = cog.search_cache[("MANGA", "ber")][0]
+    now[0] = 200.0
     narrowed = await cog.search_query_autocomplete(interaction, "bers")
 
     assert [choice.name for choice in choices] == [
@@ -887,6 +1119,8 @@ async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkey
     ]
     result, cached = await cog._cached_search(choices[0].value, "MANGA")
     assert (result, cached) == ([MANGA], True)
+    assert cog.search_cache[("MANGA", "bers")][0] == source_expiry
+    assert cog.search_cache[("MANGA", "berserk")][0] == source_expiry
     search.assert_awaited_once_with(cog.bot.session, "ber", "MANGA")
 
 
@@ -913,6 +1147,32 @@ async def test_user_autocomplete_returns_profile_names(monkeypatch):
 
     assert [(choice.name, choice.value) for choice in choices] == [("Taiga", "Taiga")]
     search.assert_awaited_once_with(cog.bot.session, "Tai", "USER")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command_name", "search_type", "query", "result", "choice_name"),
+    [
+        ("staff", "STAFF", "Miyazaki Hayao", STAFF, "Miyazaki Hayao"),
+        ("studio", "STUDIO", "Kyoto", STUDIO, "Kyoto Animation"),
+    ],
+)
+async def test_new_autocomplete_names_seed_exact_result_cache(
+    monkeypatch, command_name, search_type, query, result, choice_name
+):
+    cog = _make_cog()
+    search = AsyncMock(return_value=[result])
+    monkeypatch.setattr(anilist, "_search_results", search)
+    interaction = SimpleNamespace(command=SimpleNamespace(name=command_name))
+
+    choices = await cog.search_query_autocomplete(interaction, query)
+    cached = await cog._cached_search(choices[0].value, search_type)
+
+    assert [(choice.name, choice.value) for choice in choices] == [
+        (choice_name, choice_name)
+    ]
+    assert cached == ([result], True)
+    search.assert_awaited_once_with(cog.bot.session, query, search_type)
 
 
 @pytest.mark.asyncio
