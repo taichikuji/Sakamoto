@@ -22,6 +22,12 @@ export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 ./init-docker.sh
 ```
 
+By default, Docker Compose builds Sakamoto locally.
+
+To enable automatic updates, uncomment the published `ghcr.io/taichikuji/sakamoto:latest` image, the Watchtower label, and the `updater` service in `docker-compose.yml`. The updater uses the maintained `nickfedor/watchtower` fork, only watches labelled containers, and removes old images after successful updates.
+
+Watchtower checks daily at midnight UTC by default. Override its six-field cron expression with `WATCHTOWER_SCHEDULE`.
+
 ### Docker image
 
 ```bash
@@ -30,8 +36,6 @@ docker run -e TOKEN='YOUR_DISCORD_BOT_TOKEN' sakamoto:latest
 ```
 
 Prebuilt images are available as `ghcr.io/taichikuji/sakamoto:latest`; they can be used with Kubernetes, though this repository does not provide a Kubernetes manifest.
-
-To enable the built-in updater, uncomment its service and the `discord` service labels in `docker-compose.yml`. `CRON_SCHEDULE` defaults to `0 0 * * *` (daily).
 
 ## Develop
 
