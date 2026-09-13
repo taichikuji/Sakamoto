@@ -296,18 +296,23 @@ async def test_top_season_without_year_uses_current_year(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_top_cache_normalizes_equivalent_genres(monkeypatch):
+async def test_top_cache_normalizes_equivalent_genres_and_expires(monkeypatch):
+    now = [0.0]
     ranking = AsyncMock(return_value=[ANIME])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
     monkeypatch.setattr(anilist, "_top_results", ranking)
     cog = _make_cog()
 
     assert await cog._cached_top("ANIME", genre="Action") == ([ANIME], False)
     assert await cog._cached_top("ANIME", genre="  action  ") == ([ANIME], True)
-    ranking.assert_awaited_once_with(
+    now[0] = anilist.TOP_CACHE_TTL_SECONDS + 1
+    assert await cog._cached_top("ANIME", genre="action") == ([ANIME], False)
+    assert ranking.await_count == 2
+    ranking.assert_awaited_with(
         cog.bot.session,
         "ANIME",
         year=None,
-        genre="Action",
+        genre="action",
         season=None,
         media_format=None,
     )
@@ -622,6 +627,23 @@ async def test_anilist_unavailability_falls_back_to_tenrai_and_caches_result(
     assert await cog._cached_search(" search ", search_type) == ([fallback], True)
     request.assert_awaited_once()
     tenrai.assert_awaited_once_with(cog.bot.session, "Search", search_type, 5)
+
+
+@pytest.mark.asyncio
+async def test_tenrai_search_cache_expires_earlier(monkeypatch):
+    now = [0.0]
+    fallback = {**ANIME, "_provider": "Tenrai"}
+    search = AsyncMock(side_effect=[[fallback], [ANIME]])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
+    monkeypatch.setattr(anilist, "_search_results", search)
+    cog = _make_cog()
+
+    assert await cog._cached_search("Cowboy Bebop", "ANIME") == ([fallback], False)
+    now[0] = anilist.FALLBACK_CACHE_TTL_SECONDS - 1
+    assert await cog._cached_search("cowboy bebop", "ANIME") == ([fallback], True)
+    now[0] = anilist.FALLBACK_CACHE_TTL_SECONDS + 1
+    assert await cog._cached_search("cowboy bebop", "ANIME") == ([ANIME], False)
+    assert search.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -979,6 +1001,7 @@ async def test_pagination_rejects_other_users():
 
 @pytest.mark.asyncio
 async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkeypatch):
+    now = [100.0]
     second = {
         **MANGA,
         "title": {
@@ -988,10 +1011,13 @@ async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkey
     }
     cog = _make_cog()
     search = AsyncMock(return_value=[MANGA, second])
+    monkeypatch.setattr(anilist, "monotonic", lambda: now[0])
     monkeypatch.setattr(anilist, "_search_results", search)
     interaction = SimpleNamespace(command=SimpleNamespace(name="manga"))
 
     choices = await cog.search_query_autocomplete(interaction, "ber")
+    source_expiry = cog.search_cache[("MANGA", "ber")][0]
+    now[0] = 200.0
     narrowed = await cog.search_query_autocomplete(interaction, "bers")
 
     assert [choice.name for choice in choices] == [
@@ -1004,6 +1030,8 @@ async def test_autocomplete_reuses_prefix_and_seeds_selected_result_cache(monkey
     ]
     result, cached = await cog._cached_search(choices[0].value, "MANGA")
     assert (result, cached) == ([MANGA], True)
+    assert cog.search_cache[("MANGA", "bers")][0] == source_expiry
+    assert cog.search_cache[("MANGA", "berserk")][0] == source_expiry
     search.assert_awaited_once_with(cog.bot.session, "ber", "MANGA")
 
 

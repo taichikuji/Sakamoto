@@ -47,6 +47,8 @@ SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO", "USER"]
 # feed autocomplete, the initial embed, and every pagination button without another
 # AniList request. Discord embeds are built last so the cache stays presentation-free.
 CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+FALLBACK_CACHE_TTL_SECONDS = 60 * 60
+TOP_CACHE_TTL_SECONDS = 6 * 60 * 60
 CACHE_LIMIT = 256
 DESCRIPTION_LIMIT = 500
 SEARCH_RESULT_LIMIT = 5
@@ -934,7 +936,12 @@ class AniListCog(
             if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
                 return cached[1], True
             result = await _search_results(self.bot.session, query, search_type)
-            self._store_cache(key, result)
+            expires_at = (
+                monotonic() + FALLBACK_CACHE_TTL_SECONDS
+                if any(item.get("_provider") == "Tenrai" for item in result)
+                else None
+            )
+            self._store_cache(key, result, expires_at=expires_at)
             return result, False
 
     async def _cached_weekly_schedule(
@@ -1013,7 +1020,9 @@ class AniListCog(
                         fallback_error.status,
                     )
                     raise error from fallback_error
-            self._store_cache(key, results)
+            self._store_cache(
+                key, results, expires_at=monotonic() + TOP_CACHE_TTL_SECONDS
+            )
             return results, False
 
     async def search_query_autocomplete(
@@ -1040,6 +1049,7 @@ class AniListCog(
         async with self.autocomplete_lock:
             now = monotonic()
             cached_query = ""
+            cached_expires_at: float | None = None
             results: list[dict[str, Any]] | None = None
             for (result_type, result_query), (
                 expires_at,
@@ -1052,6 +1062,7 @@ class AniListCog(
                     and len(result_query) > len(cached_query)
                 ):
                     cached_query = result_query
+                    cached_expires_at = expires_at
                     results = cached
 
             matches = [
@@ -1072,8 +1083,12 @@ class AniListCog(
                         error.status,
                     )
                     return []
+                cached = self.search_cache.get((search_type, normalized))
+                cached_expires_at = cached[0] if cached else None
 
-            self._store_cache((search_type, normalized), matches)
+            self._store_cache(
+                (search_type, normalized), matches, expires_at=cached_expires_at
+            )
             choices: list[app_commands.Choice[str]] = []
             seen: set[str] = set()
             for result in matches:
@@ -1095,7 +1110,9 @@ class AniListCog(
                 # A selected suggestion should resolve to its exact result from cache,
                 # not cause a second search or reopen the broader suggestion set.
                 self._store_cache(
-                    (search_type, " ".join(name.casefold().split())), [result]
+                    (search_type, " ".join(name.casefold().split())),
+                    [result],
+                    expires_at=cached_expires_at,
                 )
                 if len(choices) == SEARCH_RESULT_LIMIT:
                     break
