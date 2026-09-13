@@ -235,6 +235,86 @@ async def test_search_characters_tolerates_missing_optional_data():
 
 
 @pytest.mark.asyncio
+async def test_search_people_normalizes_tenrai_records():
+    item = {
+        "url": "https://myanimelist.net/people/2009/Shinichirou_Watanabe",
+        "images": {"jpg": {"image_url": "https://example.test/watanabe.jpg"}},
+        "name": "Watanabe, Shinichirou",
+        "given_name": "信一郎",
+        "family_name": "渡辺",
+        "favorites": 15948,
+        "about": "Anime filmmaker.",
+    }
+    session = SimpleNamespace(
+        get=MagicMock(return_value=DummyResponse({"data": [item]}))
+    )
+
+    payload = await tenrai.search_people(session, "Watanabe", 5)
+
+    assert payload == {
+        "data": {
+            "Page": {
+                "staff": [
+                    {
+                        "_provider": "Tenrai",
+                        "name": {
+                            "full": "Watanabe, Shinichirou",
+                            "native": "渡辺 信一郎",
+                        },
+                        "siteUrl": item["url"],
+                        "description": "Anime filmmaker.",
+                        "image": {"large": "https://example.test/watanabe.jpg"},
+                        "primaryOccupations": [],
+                        "yearsActive": [],
+                        "favourites": 15948,
+                    }
+                ]
+            }
+        }
+    }
+    assert session.get.call_args.kwargs["params"] == {
+        "q": "Watanabe",
+        "limit": "5",
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_producers_normalizes_tenrai_records():
+    item = {
+        "url": "https://myanimelist.net/anime/producer/4/Bones",
+        "titles": [
+            {"type": "Default", "title": "Bones"},
+            {"type": "Japanese", "title": "ボンズ"},
+        ],
+        "images": {"jpg": {"image_url": "https://example.test/bones.jpg"}},
+        "favorites": 23416,
+        "about": "Japanese animation studio.",
+    }
+    session = SimpleNamespace(
+        get=MagicMock(return_value=DummyResponse({"data": [item]}))
+    )
+
+    payload = await tenrai.search_producers(session, "Bones", 5)
+
+    assert payload == {
+        "data": {
+            "Page": {
+                "studios": [
+                    {
+                        "_provider": "Tenrai",
+                        "name": "Bones",
+                        "siteUrl": item["url"],
+                        "favourites": 23416,
+                        "isAnimationStudio": None,
+                    }
+                ]
+            }
+        }
+    }
+    assert session.get.call_args.kwargs["params"] == {"q": "Bones", "limit": "5"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("payload", [{"data": {}}, {"data": [None]}, None])
 async def test_search_characters_rejects_malformed_response(payload):
     session = SimpleNamespace(get=MagicMock(return_value=DummyResponse(payload)))

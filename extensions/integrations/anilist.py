@@ -23,6 +23,8 @@ from extensions.core.analytics import mark_app_command_failed
 from ._tenrai_fallback import TenraiError
 from ._tenrai_fallback import search_characters as search_tenrai_characters
 from ._tenrai_fallback import search_media as search_tenrai_media
+from ._tenrai_fallback import search_people as search_tenrai_people
+from ._tenrai_fallback import search_producers as search_tenrai_producers
 from ._tenrai_fallback import top_media as top_tenrai_media
 from ._tenrai_fallback import weekly_schedule as weekly_tenrai_schedule
 
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 ANILIST_URL = "https://graphql.anilist.co"
 MediaType = Literal["ANIME", "MANGA"]
-SearchType = Literal[MediaType, "CHARACTER", "USER"]
+SearchType = Literal[MediaType, "CHARACTER", "USER", "STAFF", "STUDIO"]
 
 # ANILIST REQUEST POLICY
 # AniList is a shared, rate-limited service currently operating with reduced capacity.
@@ -89,6 +91,35 @@ query ($search: String!, $perPage: Int!) {
       gender
       age
       favourites
+    }
+  }
+}
+"""
+
+STAFF_SEARCH = """
+query ($search: String!, $perPage: Int!) {
+  Page(page: 1, perPage: $perPage) {
+    staff(search: $search) {
+      name { full native }
+      siteUrl
+      description(asHtml: false)
+      image { large }
+      primaryOccupations
+      yearsActive
+      favourites
+    }
+  }
+}
+"""
+
+STUDIO_SEARCH = """
+query ($search: String!, $perPage: Int!) {
+  Page(page: 1, perPage: $perPage) {
+    studios(search: $search) {
+      name
+      siteUrl
+      favourites
+      isAnimationStudio
     }
   }
 }
@@ -285,6 +316,10 @@ async def _search_results(
         document, result_field = CHARACTER_SEARCH, "characters"
     elif search_type == "USER":
         document, result_field = USER_SEARCH, "users"
+    elif search_type == "STAFF":
+        document, result_field = STAFF_SEARCH, "staff"
+    elif search_type == "STUDIO":
+        document, result_field = STUDIO_SEARCH, "studios"
     else:
         document, result_field = MEDIA_SEARCH, "media"
         variables["type"] = search_type
@@ -301,6 +336,10 @@ async def _search_results(
         try:
             if search_type == "CHARACTER":
                 payload = await search_tenrai_characters(session, query, limit)
+            elif search_type == "STAFF":
+                payload = await search_tenrai_people(session, query, limit)
+            elif search_type == "STUDIO":
+                payload = await search_tenrai_producers(session, query, limit)
             else:
                 payload = await search_tenrai_media(session, query, search_type, limit)
         except TenraiError as fallback_error:
@@ -397,15 +436,15 @@ def _label(value: Any) -> str:
 
 
 def _result_names(result: dict[str, Any], search_type: SearchType) -> list[str]:
-    if search_type == "USER":
+    if search_type in ("USER", "STUDIO"):
         name = result.get("name")
         return [str(name).strip()] if name else []
-    names = result.get("name" if search_type == "CHARACTER" else "title")
+    names = result.get("name" if search_type in ("CHARACTER", "STAFF") else "title")
     if not isinstance(names, dict):
         return []
     fields = (
         ("full", "native")
-        if search_type == "CHARACTER"
+        if search_type in ("CHARACTER", "STAFF")
         else (
             "romaji",
             "english",
@@ -528,6 +567,91 @@ def character_embed(
     return embed
 
 
+def staff_embed(staff: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
+    """Build a compact, linked embed for one staff result."""
+    names = staff.get("name")
+    if not isinstance(names, dict):
+        names = {}
+    title = names.get("full") or names.get("native") or "Unknown staff member"
+    site_url = staff.get("siteUrl")
+    embed = Embed(
+        title=str(title)[:256],
+        url=site_url if isinstance(site_url, str) else None,
+        description=_clean_description(staff.get("description")),
+        color=color,
+    )
+    occupations = staff.get("primaryOccupations")
+    if isinstance(occupations, list) and occupations:
+        embed.add_field(
+            name=":briefcase: Occupations",
+            value=", ".join(map(str, occupations))[:1024],
+            inline=True,
+        )
+    years_active = staff.get("yearsActive")
+    if isinstance(years_active, list) and years_active:
+        embed.add_field(
+            name=":calendar: Active",
+            value="–".join(map(str, years_active)),
+            inline=True,
+        )
+    favourites = staff.get("favourites")
+    embed.add_field(
+        name=":heart: Favourites",
+        value=f"{favourites:,}" if isinstance(favourites, int) else "—",
+        inline=True,
+    )
+    native_name = names.get("native")
+    footer = "Staff"
+    if isinstance(native_name, str) and native_name != title:
+        footer = f"{footer} • {native_name}"
+    embed.set_footer(text=footer[:2048])
+    image = staff.get("image")
+    image_url = image.get("large") if isinstance(image, dict) else None
+    if isinstance(image_url, str):
+        embed.set_thumbnail(url=image_url)
+    provider = "Tenrai" if staff.get("_provider") == "Tenrai" else "AniList"
+    embed.set_author(
+        name=f"{provider} • Cache Hit" if cached else provider,
+        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    )
+    return embed
+
+
+def studio_embed(studio: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
+    """Build a compact, linked embed for one studio result."""
+    name = str(studio.get("name") or "Unknown studio")
+    site_url = studio.get("siteUrl")
+    embed = Embed(
+        title=name[:256],
+        url=site_url if isinstance(site_url, str) else None,
+        color=color,
+    )
+    embed.add_field(
+        name=":film_frames: Animation Studio",
+        value=(
+            "Yes"
+            if studio.get("isAnimationStudio") is True
+            else "No"
+            if studio.get("isAnimationStudio") is False
+            else "—"
+        ),
+        inline=True,
+    )
+    favourites = studio.get("favourites")
+    embed.add_field(
+        name=":heart: Favourites",
+        value=f"{favourites:,}" if isinstance(favourites, int) else "—",
+        inline=True,
+    )
+    embed.set_footer(text="Studio")
+    provider = "Tenrai" if studio.get("_provider") == "Tenrai" else "AniList"
+    embed.set_author(
+        name=f"{provider} • Cache Hit" if cached else provider,
+        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+    )
+    return embed
+
+
 def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
     """Build a linked overview of one AniList user's public profile."""
     name = str(user.get("name") or "Unknown user")
@@ -587,6 +711,10 @@ def result_embed(
 ) -> Embed:
     if search_type == "USER":
         return user_embed(result, color, cached=cached)
+    if search_type == "STAFF":
+        return staff_embed(result, color, cached=cached)
+    if search_type == "STUDIO":
+        return studio_embed(result, color, cached=cached)
     return (
         character_embed(result, color, cached=cached)
         if search_type == "CHARACTER"
@@ -892,6 +1020,8 @@ class AniListCog(
             "manga": "MANGA",
             "character": "CHARACTER",
             "user": "USER",
+            "staff": "STAFF",
+            "studio": "STUDIO",
         }.get(command_name)
         if (
             len(query) < AUTOCOMPLETE_MIN_LENGTH
@@ -990,6 +1120,20 @@ class AniListCog(
     @app_commands.autocomplete(query=search_query_autocomplete)
     async def user(self, interaction: Interaction, query: str) -> None:
         await self._search_command(interaction, query, "USER")
+
+    @app_commands.command(
+        name="staff", description="Search AniList for production staff."
+    )
+    @app_commands.describe(query="Staff member name to search for.")
+    @app_commands.autocomplete(query=search_query_autocomplete)
+    async def staff(self, interaction: Interaction, query: str) -> None:
+        await self._search_command(interaction, query, "STAFF")
+
+    @app_commands.command(name="studio", description="Search AniList for a studio.")
+    @app_commands.describe(query="Studio name to search for.")
+    @app_commands.autocomplete(query=search_query_autocomplete)
+    async def studio(self, interaction: Interaction, query: str) -> None:
+        await self._search_command(interaction, query, "STUDIO")
 
     @app_commands.command(
         name="top", description="Browse top-ranked anime or manga on AniList."

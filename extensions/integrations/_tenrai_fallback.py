@@ -168,6 +168,73 @@ def _character_page(payload: dict[str, Any]) -> dict[str, Any]:
     return {"data": {"Page": {"characters": results}}}
 
 
+def _people_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai people records into the shared AniList Page shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        native_parts = [item.get("family_name"), item.get("given_name")]
+        native_name = " ".join(
+            part for part in native_parts if isinstance(part, str) and part
+        )
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "name": {
+                    "full": item.get("name"),
+                    "native": native_name or None,
+                },
+                "siteUrl": item.get("url"),
+                "description": item.get("about"),
+                "image": _cover_image(item),
+                "primaryOccupations": [],
+                "yearsActive": [],
+                "favourites": item.get("favorites"),
+            }
+        )
+    return {"data": {"Page": {"staff": results}}}
+
+
+def _producer_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate Tenrai producer records into the shared AniList Page shape."""
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise TenraiError("Tenrai returned an unexpected response.")
+
+    results: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TenraiError("Tenrai returned an unexpected response.")
+        titles = item.get("titles")
+        name = None
+        if isinstance(titles, list):
+            name = next(
+                (
+                    title.get("title")
+                    for title in titles
+                    if isinstance(title, dict)
+                    and title.get("type") == "Default"
+                    and isinstance(title.get("title"), str)
+                ),
+                None,
+            )
+        results.append(
+            {
+                "_provider": "Tenrai",
+                "name": name or item.get("name"),
+                "siteUrl": item.get("url"),
+                "favourites": item.get("favorites"),
+                "isAnimationStudio": None,
+            }
+        )
+    return {"data": {"Page": {"studios": results}}}
+
+
 async def _request(
     session: ClientSession, resource: str, params: dict[str, str]
 ) -> dict[str, Any]:
@@ -294,6 +361,22 @@ async def search_characters(
     """Search Tenrai and translate characters into an AniList Page response."""
     payload = await _request(session, "characters", {"q": query, "limit": str(limit)})
     return _character_page(payload)
+
+
+async def search_people(
+    session: ClientSession, query: str, limit: int
+) -> dict[str, Any]:
+    """Search Tenrai people and translate them into AniList staff records."""
+    payload = await _request(session, "people", {"q": query, "limit": str(limit)})
+    return _people_page(payload)
+
+
+async def search_producers(
+    session: ClientSession, query: str, limit: int
+) -> dict[str, Any]:
+    """Search Tenrai producers and translate them into AniList studio records."""
+    payload = await _request(session, "producers", {"q": query, "limit": str(limit)})
+    return _producer_page(payload)
 
 
 async def top_media(

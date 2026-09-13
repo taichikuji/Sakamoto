@@ -62,6 +62,23 @@ CHARACTER = {
     "favourites": 123456,
 }
 
+STAFF = {
+    "name": {"full": "Shinichiro Watanabe", "native": "渡辺 信一郎"},
+    "siteUrl": "https://anilist.co/staff/12",
+    "description": "Anime director.",
+    "image": {"large": "https://example.test/watanabe.jpg"},
+    "primaryOccupations": ["Director", "Writer"],
+    "yearsActive": [1987, 2026],
+    "favourites": 1234,
+}
+
+STUDIO = {
+    "name": "Bones",
+    "siteUrl": "https://anilist.co/studio/4",
+    "favourites": 5678,
+    "isAnimationStudio": True,
+}
+
 USER = {
     "name": "Taiga",
     "siteUrl": "https://anilist.co/user/Taiga",
@@ -106,6 +123,8 @@ def test_commands_are_grouped_under_anilist():
         ("manga", "anilist manga"),
         ("character", "anilist character"),
         ("user", "anilist user"),
+        ("staff", "anilist staff"),
+        ("studio", "anilist studio"),
         ("top", "anilist top"),
         ("weekly", "anilist weekly"),
     ]
@@ -541,6 +560,20 @@ async def test_weekly_cache_reuses_results_within_the_same_week(monkeypatch):
             {"search": "Berserk", "perPage": 3},
             USER,
         ),
+        (
+            "STAFF",
+            anilist.STAFF_SEARCH,
+            "staff",
+            {"search": "Berserk", "perPage": 3},
+            STAFF,
+        ),
+        (
+            "STUDIO",
+            anilist.STUDIO_SEARCH,
+            "studios",
+            {"search": "Berserk", "perPage": 3},
+            STUDIO,
+        ),
     ],
 )
 async def test_search_results_selects_document_variables_and_collection(
@@ -612,6 +645,44 @@ async def test_character_403_uses_tenrai_for_autocomplete_and_cache(monkeypatch)
     ]
     assert embed.author.name == "Tenrai • Cache Hit"
     assert embed.author.url == "https://tenrai.org/"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_type", "fallback_name", "field", "result"),
+    [
+        ("STAFF", "search_tenrai_people", "staff", STAFF),
+        ("STUDIO", "search_tenrai_producers", "studios", STUDIO),
+    ],
+)
+async def test_catalogue_search_types_fall_back_to_tenrai(
+    monkeypatch, search_type, fallback_name, field, result
+):
+    monkeypatch.setattr(
+        anilist,
+        "_request",
+        AsyncMock(side_effect=anilist.AniListError("unavailable", 503)),
+    )
+    fallback = AsyncMock(return_value={"data": {"Page": {field: [result]}}})
+    monkeypatch.setattr(anilist, fallback_name, fallback)
+    session = object()
+
+    assert await anilist._search_results(session, "Bones", search_type) == [result]
+    fallback.assert_awaited_once_with(session, "Bones", 5)
+
+
+def test_fallback_staff_and_studio_embeds_keep_tenrai_attribution():
+    staff = {**STAFF, "_provider": "Tenrai"}
+    studio = {**STUDIO, "_provider": "Tenrai", "isAnimationStudio": None}
+
+    staff_embed = anilist.staff_embed(staff, 0x123456, cached=True)
+    studio_embed = anilist.studio_embed(studio, 0x123456, cached=True)
+
+    assert staff_embed.author.name == "Tenrai • Cache Hit"
+    assert staff_embed.author.url == "https://tenrai.org/"
+    assert studio_embed.author.name == "Tenrai • Cache Hit"
+    assert studio_embed.author.url == "https://tenrai.org/"
+    assert studio_embed.fields[0].value == "—"
 
 
 @pytest.mark.asyncio
@@ -749,6 +820,35 @@ def test_character_embed_uses_character_details():
     ]
     assert embed.footer.text == "Character • モンキー・D・ルフィ"
     assert embed.thumbnail.url == CHARACTER["image"]["large"]
+    assert embed.author.name == "AniList • Cache Hit"
+
+
+def test_staff_embed_uses_staff_details():
+    embed = anilist.staff_embed(STAFF, 0x123456, cached=True)
+
+    assert embed.title == "Shinichiro Watanabe"
+    assert embed.url == STAFF["siteUrl"]
+    assert embed.description == "Anime director."
+    assert [(field.name, field.value) for field in embed.fields] == [
+        (":briefcase: Occupations", "Director, Writer"),
+        (":calendar: Active", "1987–2026"),
+        (":heart: Favourites", "1,234"),
+    ]
+    assert embed.footer.text == "Staff • 渡辺 信一郎"
+    assert embed.thumbnail.url == STAFF["image"]["large"]
+    assert embed.author.name == "AniList • Cache Hit"
+
+
+def test_studio_embed_uses_studio_details():
+    embed = anilist.studio_embed(STUDIO, 0x123456, cached=True)
+
+    assert embed.title == "Bones"
+    assert embed.url == STUDIO["siteUrl"]
+    assert [(field.name, field.value) for field in embed.fields] == [
+        (":film_frames: Animation Studio", "Yes"),
+        (":heart: Favourites", "5,678"),
+    ]
+    assert embed.footer.text == "Studio"
     assert embed.author.name == "AniList • Cache Hit"
 
 
