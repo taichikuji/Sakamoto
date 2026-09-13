@@ -1,7 +1,7 @@
 services:
   discord:
     build: ./
-    # image: ghcr.io/taichikuji/sakamoto
+    # image: ghcr.io/taichikuji/sakamoto:latest
     restart: unless-stopped
     mem_limit: 512m
     # Matching the memory limit disables container swap.
@@ -12,20 +12,24 @@ services:
       - STEAM_TOKEN=${STEAM_TOKEN}
     volumes:
       - sakamoto_db:/usr/src/app/data
-    # Label for updater to detect the service to update
+    # Label for Watchtower to detect the service to update.
     # labels:
-    #   - "com.taichikuji.sakamoto.enable=true"
+    #   - "com.centurylinklabs.watchtower.enable=true"
 
-  # Uncomment the following section to enable automatic updates on sakamoto
+  # Uncomment the following section, the image above, and the discord label
+  # to enable automatic updates with the maintained Watchtower fork.
   # updater:
-  #   build: ./updater
+  #   image: nickfedor/watchtower:latest
   #   container_name: sakamoto-updater
   #   restart: unless-stopped
   #   volumes:
   #     - /var/run/docker.sock:/var/run/docker.sock
-  #     - .:/workspace:ro,z
   #   environment:
-  #     - CRON_SCHEDULE=${CRON_SCHEDULE:-0 0 * * *}
+  #     WATCHTOWER_LABEL_ENABLE: "true"
+  #     WATCHTOWER_CLEANUP: "true"
+  #     WATCHTOWER_SCHEDULE: "${WATCHTOWER_SCHEDULE:-0 0 0 * * *}"
+  #     WATCHTOWER_NOTIFICATION_URL: "${WATCHTOWER_NOTIFICATION_URL}"
+  #     WATCHTOWER_NOTIFICATION_REPORT: "true"
 
 volumes:
   sakamoto_db:
