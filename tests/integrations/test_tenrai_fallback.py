@@ -401,6 +401,27 @@ async def test_search_catalogue_retries_one_rate_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retry_after",
+    ["nan", "inf", str(tenrai.MAX_RETRY_AFTER_SECONDS + 1)],
+)
+async def test_search_catalogue_rejects_unsafe_retry_delay(monkeypatch, retry_after):
+    session = SimpleNamespace(
+        get=MagicMock(
+            return_value=DummyResponse(status=429, headers={"Retry-After": retry_after})
+        )
+    )
+    wait = AsyncMock()
+    monkeypatch.setattr(tenrai, "sleep", wait)
+
+    with pytest.raises(tenrai.TenraiError, match="unsafe retry delay") as raised:
+        await tenrai.search_catalogue(session, "Berserk", "MANGA", 5)
+
+    assert raised.value.status == 429
+    wait.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_search_catalogue_rejects_invalid_json():
     session = SimpleNamespace(
         get=MagicMock(return_value=DummyResponse(json_error=ValueError()))

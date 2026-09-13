@@ -7,12 +7,14 @@ response shape consumed by the shared parser.
 
 from asyncio import sleep
 from datetime import UTC, datetime, time, timedelta
+from math import isfinite
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 TENRAI_URL = "https://api.tenrai.org/v1"
+MAX_RETRY_AFTER_SECONDS = 30
 MediaType = Literal["ANIME", "MANGA"]
 SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO"]
 _WEEKDAYS = {
@@ -275,6 +277,8 @@ async def _request(
             delay = max(float(retry_after), 0)
         except TypeError, ValueError:
             delay = 1
+        if not isfinite(delay) or delay > MAX_RETRY_AFTER_SECONDS:
+            raise TenraiError("Tenrai returned an unsafe retry delay.", 429)
         await sleep(delay)
 
 
