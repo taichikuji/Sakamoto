@@ -56,26 +56,35 @@ WEEKLY_CACHE_TTL_SECONDS = 60 * 60
 WEEKLY_QUERY_PAGE_SIZE = 50
 WEEKLY_PAGE_SIZE = 25
 
-MEDIA_SEARCH = """
+MEDIA_FIELDS = """
+fragment MediaFields on Media {
+  title { romaji english native }
+  siteUrl
+  description(asHtml: false)
+  coverImage { large }
+  bannerImage
+  format
+  status
+  episodes
+  chapters
+  volumes
+  averageScore
+  genres
+}
+"""
+
+MEDIA_SEARCH = (
+    """
 query ($search: String!, $type: MediaType!, $perPage: Int!) {
   Page(page: 1, perPage: $perPage) {
     media(search: $search, type: $type, isAdult: false) {
-      title { romaji english native }
-      siteUrl
-      description(asHtml: false)
-      coverImage { large }
-      bannerImage
-      format
-      status
-      episodes
-      chapters
-      volumes
-      averageScore
-      genres
+      ...MediaFields
     }
   }
 }
 """
+    + MEDIA_FIELDS
+)
 
 CHARACTER_SEARCH = """
 query ($search: String!, $perPage: Int!) {
@@ -160,7 +169,8 @@ query ($page: Int!, $perPage: Int!, $start: Int!, $end: Int!) {
 }
 """
 
-TOP_MEDIA = """
+TOP_MEDIA = (
+    """
 query (
   $type: MediaType!
   $perPage: Int!
@@ -181,22 +191,13 @@ query (
       isAdult: false
       sort: [SCORE_DESC]
     ) {
-      title { romaji english native }
-      siteUrl
-      description(asHtml: false)
-      coverImage { large }
-      bannerImage
-      format
-      status
-      episodes
-      chapters
-      volumes
-      averageScore
-      genres
+      ...MediaFields
     }
   }
 }
 """
+    + MEDIA_FIELDS
+)
 
 
 class AniListError(Exception):
@@ -456,6 +457,19 @@ def _set_provider_author(embed: Embed, result: dict[str, Any], *, cached: bool) 
         name=author,
         url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
     )
+
+
+async def _send_anilist_error(
+    interaction: Interaction, operation: str, error: AniListError
+) -> None:
+    logger.warning("AniList %s failed with status %s", operation, error.status)
+    message = (
+        ":x: AniList has temporarily disabled its API. Please try again later."
+        if error.status == 403
+        else ":x: AniList is unavailable. Please try again later."
+    )
+    await interaction.followup.send(message, ephemeral=True)
+    mark_app_command_failed(interaction)
 
 
 def media_embed(
@@ -746,10 +760,6 @@ def weekly_embeds(
     ]
 
     provider = "Tenrai" if entries[0].get("_provider") == "Tenrai" else "AniList"
-    author = f"{provider} • Cache Hit" if cached else provider
-    author_url = (
-        "https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/"
-    )
     pages: list[Embed] = []
     for index, description in enumerate(descriptions, start=1):
         embed = Embed(
@@ -757,7 +767,7 @@ def weekly_embeds(
             description=description,
             color=color,
         )
-        embed.set_author(name=author, url=author_url)
+        _set_provider_author(embed, entries[0], cached=cached)
         detail = (
             "Tenrai broadcast times • Episode numbers unavailable"
             if provider == "Tenrai"
@@ -880,6 +890,16 @@ class AniListCog(
         self.autocomplete_lock = Lock()
         self.weekly_cache: tuple[int, float, list[dict[str, Any]]] | None = None
         self.weekly_lock = Lock()
+
+    async def _http_session_ready(self, interaction: Interaction) -> bool:
+        if self.bot.session is not None:
+            return True
+        await interaction.response.send_message(
+            ":x: The bot's HTTP session is not ready. Please try again later.",
+            ephemeral=True,
+        )
+        mark_app_command_failed(interaction)
+        return False
 
     def _store_cache(
         self,
@@ -1188,12 +1208,7 @@ class AniListCog(
         season: str | None = None,
         format: str | None = None,
     ) -> None:
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         selected_type: MediaType = "MANGA" if media_type == "MANGA" else "ANIME"
@@ -1207,14 +1222,7 @@ class AniListCog(
                 media_format=format,
             )
         except AniListError as error:
-            logger.warning("AniList top ranking failed with status %s", error.status)
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, "top ranking", error)
             return
 
         if not results:
@@ -1248,12 +1256,7 @@ class AniListCog(
         name="weekly", description="Show anime airing during the current week."
     )
     async def weekly(self, interaction: Interaction) -> None:
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         week_start, week_end = _week_bounds()
@@ -1261,16 +1264,7 @@ class AniListCog(
         try:
             entries, cached = await self._cached_weekly_schedule(week_start, week_end)
         except AniListError as error:
-            logger.warning(
-                "AniList weekly schedule failed with status %s", error.status
-            )
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, "weekly schedule", error)
             return
 
         pages = weekly_embeds(entries, self.bot.color, cached=cached)
@@ -1301,28 +1295,14 @@ class AniListCog(
             )
             mark_app_command_failed(interaction)
             return
-        if self.bot.session is None:
-            await interaction.response.send_message(
-                ":x: The bot's HTTP session is not ready. Please try again later.",
-                ephemeral=True,
-            )
-            mark_app_command_failed(interaction)
+        if not await self._http_session_ready(interaction):
             return
 
         await interaction.response.defer()
         try:
             result, cached = await self._cached_search(query, search_type)
         except AniListError as error:
-            logger.warning(
-                "AniList %s search failed with status %s", label, error.status
-            )
-            message = (
-                ":x: AniList has temporarily disabled its API. Please try again later."
-                if error.status == 403
-                else ":x: AniList is unavailable. Please try again later."
-            )
-            await interaction.followup.send(message, ephemeral=True)
-            mark_app_command_failed(interaction)
+            await _send_anilist_error(interaction, f"{label} search", error)
             return
 
         if not result:
