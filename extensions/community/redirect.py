@@ -11,20 +11,23 @@ class ReplaceCog(commands.Cog):
     """Cog for replacing social media links with alternative frontends."""
 
     def __init__(self, bot: Sakamoto):
-        self.bot = bot
-        self.replacements = {
+        sources_by_target = {
             "fixupx.com": ("x.com", "twitter.com"),
             "fxbsky.app": ("bsky.social", "bsky.app"),
             "vm.tnktok.com": ("tiktok.com", "vm.tiktok.com"),
             "instagram7.com": ("instagram.com",),
         }
+        self.replacements = tuple(
+            (f"{prefix}{source}/", f"https://{target}/")
+            for target, sources in sources_by_target.items()
+            for source in sources
+            for prefix in ("http://", "http://www.", "https://", "https://www.")
+        )
 
     def replace_text(self, text: str) -> str:
         """Rewrite supported URLs in text."""
-        for target, sources in self.replacements.items():
-            for source in sources:
-                for prefix in ("http://", "http://www.", "https://", "https://www."):
-                    text = text.replace(f"{prefix}{source}/", f"https://{target}/")
+        for source, target in self.replacements:
+            text = text.replace(source, target)
         return text
 
     @commands.Cog.listener()
