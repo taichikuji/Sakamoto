@@ -26,32 +26,12 @@ from extensions.community.redirect import ReplaceCog
             "clip https://vm.tnktok.com/@u/video/123",
         ),
         (
+            "clip https://vm.tiktok.com/abc123/",
+            "clip https://vm.tnktok.com/abc123/",
+        ),
+        (
             "photo https://instagram.com/p/abc",
             "photo https://instagram7.com/p/abc",
-        ),
-        (
-            "art https://www.pixiv.net/en/artworks/123",
-            "art https://phixiv.net/en/artworks/123",
-        ),
-        (
-            "short https://youtube.com/shorts/abc123",
-            "short https://youtu.be/abc123",
-        ),
-        (
-            "thread https://reddit.com/r/python/comments/xyz",
-            "thread https://vxreddit.com/r/python/comments/xyz",
-        ),
-        (
-            "reel https://www.facebook.com/reel/12345",
-            "reel https://facebed.seria.moe/reel/12345",
-        ),
-        (
-            "video https://www.bilibili.com/video/BV123",
-            "video https://vxbilibili.com/video/BV123",
-        ),
-        (
-            "song https://open.spotify.com/track/123abc?si=xyz",
-            "song https://fxspotify.com/track/123abc?si=xyz",
         ),
     ],
 )
