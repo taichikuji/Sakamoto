@@ -49,10 +49,6 @@ from extensions.community.redirect import ReplaceCog
             "video https://www.bilibili.com/video/BV123",
             "video https://vxbilibili.com/video/BV123",
         ),
-        (
-            "song https://open.spotify.com/track/123abc?si=xyz",
-            "song https://fxspotify.com/track/123abc?si=xyz",
-        ),
     ],
 )
 def test_replace_text_rewrites_supported_domains(original, expected):

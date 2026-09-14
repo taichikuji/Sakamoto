@@ -25,7 +25,6 @@ class ReplaceCog(commands.Cog):
             "reddit.com": "vxreddit.com",
             "facebook.com": "facebed.seria.moe",
             "bilibili.com": "vxbilibili.com",
-            "open.spotify.com": "fxspotify.com",
         }
 
     def replace_text(self, text: str) -> str:
