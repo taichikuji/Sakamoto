@@ -13,25 +13,18 @@ class ReplaceCog(commands.Cog):
     def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.replacements = {
-            "x.com": "fixupx.com",
-            "twitter.com": "fixupx.com",
-            "bsky.social": "fxbsky.app",
-            "bsky.app": "fxbsky.app",
-            "tiktok.com": "vm.tnktok.com",
-            "vm.tiktok.com": "vm.tnktok.com",
-            "instagram.com": "instagram7.com",
-            "pixiv.net": "phixiv.net",
-            "youtube.com/shorts": "youtu.be",
-            "reddit.com": "vxreddit.com",
-            "facebook.com": "facebed.seria.moe",
-            "bilibili.com": "vxbilibili.com",
+            "fixupx.com": ("x.com", "twitter.com"),
+            "fxbsky.app": ("bsky.social", "bsky.app"),
+            "vm.tnktok.com": ("tiktok.com", "vm.tiktok.com"),
+            "instagram7.com": ("instagram.com",),
         }
 
     def replace_text(self, text: str) -> str:
         """Rewrite supported URLs in text."""
-        for source, target in self.replacements.items():
-            for prefix in ("http://", "http://www.", "https://", "https://www."):
-                text = text.replace(f"{prefix}{source}/", f"https://{target}/")
+        for target, sources in self.replacements.items():
+            for source in sources:
+                for prefix in ("http://", "http://www.", "https://", "https://www."):
+                    text = text.replace(f"{prefix}{source}/", f"https://{target}/")
         return text
 
     @commands.Cog.listener()
