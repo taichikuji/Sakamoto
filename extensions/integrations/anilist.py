@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 ANILIST_URL = "https://graphql.anilist.co"
 MediaType = Literal["ANIME", "MANGA"]
-SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO", "USER"]
+SearchType = Literal[MediaType, "CHARACTER", "USER"]
 
 # ANILIST REQUEST POLICY
 # AniList is a shared, rate-limited service currently operating with reduced capacity.
@@ -98,35 +98,6 @@ query ($search: String!, $perPage: Int!) {
       image { large }
       gender
       age
-      favourites
-    }
-  }
-}
-"""
-
-STAFF_SEARCH = """
-query ($search: String!, $perPage: Int!) {
-  Page(page: 1, perPage: $perPage) {
-    staff(search: $search) {
-      name { full native alternative }
-      siteUrl
-      description(asHtml: false)
-      image { large }
-      primaryOccupations
-      languageV2
-      favourites
-    }
-  }
-}
-"""
-
-STUDIO_SEARCH = """
-query ($search: String!, $perPage: Int!) {
-  Page(page: 1, perPage: $perPage) {
-    studios(search: $search) {
-      name
-      siteUrl
-      isAnimationStudio
       favourites
     }
   }
@@ -319,8 +290,6 @@ async def _search_results(
     else:
         document, result_field = {
             "CHARACTER": (CHARACTER_SEARCH, "characters"),
-            "STAFF": (STAFF_SEARCH, "staff"),
-            "STUDIO": (STUDIO_SEARCH, "studios"),
             "USER": (USER_SEARCH, "users"),
         }[search_type]
     try:
@@ -439,28 +408,22 @@ def _label(value: Any) -> str:
 
 
 def _result_names(result: dict[str, Any], search_type: SearchType) -> list[str]:
-    if search_type in ("STUDIO", "USER"):
+    if search_type == "USER":
         name = result.get("name")
         return [str(name).strip()] if name else []
-    names = result.get("name" if search_type in ("CHARACTER", "STAFF") else "title")
+    names = result.get("name" if search_type == "CHARACTER" else "title")
     if not isinstance(names, dict):
         return []
     fields = (
         ("full", "native")
-        if search_type in ("CHARACTER", "STAFF")
+        if search_type == "CHARACTER"
         else (
             "romaji",
             "english",
             "native",
         )
     )
-    result_names = [str(names[field]).strip() for field in fields if names.get(field)]
-    alternatives = names.get("alternative")
-    if search_type == "STAFF" and isinstance(alternatives, list):
-        result_names.extend(
-            name.strip() for name in alternatives if isinstance(name, str) and name
-        )
-    return result_names
+    return [str(names[field]).strip() for field in fields if names.get(field)]
 
 
 def _set_provider_author(embed: Embed, result: dict[str, Any], *, cached: bool) -> None:
@@ -587,87 +550,6 @@ def character_embed(
     return embed
 
 
-def staff_embed(staff: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
-    """Build a compact, linked embed for one staff result."""
-    names = staff.get("name")
-    if not isinstance(names, dict):
-        names = {}
-    title = names.get("full") or names.get("native") or "Unknown staff member"
-    site_url = staff.get("siteUrl")
-    embed = Embed(
-        title=str(title)[:256],
-        url=site_url if isinstance(site_url, str) else None,
-        description=_clean_description(
-            staff.get("description"), "No biography available."
-        ),
-        color=color,
-    )
-
-    occupations = staff.get("primaryOccupations")
-    occupation_text = (
-        ", ".join(
-            occupation
-            for occupation in occupations
-            if isinstance(occupation, str) and occupation
-        )[:1024]
-        if isinstance(occupations, list)
-        else ""
-    )
-    favourites = staff.get("favourites")
-    metrics = (
-        (":tools: Occupations", occupation_text or "—"),
-        (":speech_balloon: Language", str(staff.get("languageV2") or "—")),
-        (
-            ":heart: Favourites",
-            f"{favourites:,}" if isinstance(favourites, int) else "—",
-        ),
-    )
-    for name, value in metrics:
-        embed.add_field(name=name, value=value, inline=True)
-
-    native_name = names.get("native")
-    footer = "Staff"
-    if isinstance(native_name, str) and native_name != title:
-        footer = f"{footer} • {native_name}"
-    embed.set_footer(text=footer[:2048])
-
-    image = staff.get("image")
-    image_url = image.get("large") if isinstance(image, dict) else None
-    if isinstance(image_url, str):
-        embed.set_thumbnail(url=image_url)
-    _set_provider_author(embed, staff, cached=cached)
-    return embed
-
-
-def studio_embed(studio: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
-    """Build a compact, linked embed for one studio result."""
-    title = str(studio.get("name") or "Unknown studio")
-    site_url = studio.get("siteUrl")
-    embed = Embed(
-        title=title[:256],
-        url=site_url if isinstance(site_url, str) else None,
-        color=color,
-    )
-    animation_studio = studio.get("isAnimationStudio")
-    studio_type = (
-        "Animation studio"
-        if animation_studio is True
-        else "Production company"
-        if animation_studio is False
-        else "—"
-    )
-    favourites = studio.get("favourites")
-    embed.add_field(name=":office: Type", value=studio_type, inline=True)
-    embed.add_field(
-        name=":heart: Favourites",
-        value=f"{favourites:,}" if isinstance(favourites, int) else "—",
-        inline=True,
-    )
-    embed.set_footer(text="Studio")
-    _set_provider_author(embed, studio, cached=cached)
-    return embed
-
-
 def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Embed:
     """Build a linked overview of one AniList user's public profile."""
     name = str(user.get("name") or "Unknown user")
@@ -728,10 +610,6 @@ def result_embed(
         return user_embed(result, color, cached=cached)
     if search_type == "CHARACTER":
         return character_embed(result, color, cached=cached)
-    if search_type == "STAFF":
-        return staff_embed(result, color, cached=cached)
-    if search_type == "STUDIO":
-        return studio_embed(result, color, cached=cached)
     return media_embed(result, search_type, color, cached=cached)
 
 
@@ -1045,8 +923,6 @@ class AniListCog(
             "anime": "ANIME",
             "manga": "MANGA",
             "character": "CHARACTER",
-            "staff": "STAFF",
-            "studio": "STUDIO",
             "user": "USER",
         }.get(command_name)
         if (
@@ -1148,20 +1024,6 @@ class AniListCog(
     @app_commands.autocomplete(query=search_query_autocomplete)
     async def character(self, interaction: Interaction, query: str) -> None:
         await self._search_command(interaction, query, "CHARACTER")
-
-    @app_commands.command(
-        name="staff", description="Search AniList for a staff member."
-    )
-    @app_commands.describe(query="Staff member name to search for.")
-    @app_commands.autocomplete(query=search_query_autocomplete)
-    async def staff(self, interaction: Interaction, query: str) -> None:
-        await self._search_command(interaction, query, "STAFF")
-
-    @app_commands.command(name="studio", description="Search AniList for a studio.")
-    @app_commands.describe(query="Studio name to search for.")
-    @app_commands.autocomplete(query=search_query_autocomplete)
-    async def studio(self, interaction: Interaction, query: str) -> None:
-        await self._search_command(interaction, query, "STUDIO")
 
     @app_commands.command(name="user", description="Search for an AniList user.")
     @app_commands.describe(query="AniList username to search for.")
