@@ -16,7 +16,7 @@ from aiohttp import ClientError, ClientSession, ClientTimeout
 TENRAI_URL = "https://api.tenrai.org/v1"
 MAX_RETRY_AFTER_SECONDS = 30
 MediaType = Literal["ANIME", "MANGA"]
-SearchType = Literal[MediaType, "CHARACTER", "STAFF", "STUDIO"]
+SearchType = Literal[MediaType, "CHARACTER"]
 _WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -171,78 +171,6 @@ def _character_page(payload: dict[str, Any]) -> dict[str, Any]:
     return {"data": {"Page": {"characters": results}}}
 
 
-def _staff_page(payload: dict[str, Any]) -> dict[str, Any]:
-    """Translate Tenrai people into the shared AniList Staff shape."""
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise TenraiError("Tenrai returned an unexpected response.")
-
-    results: list[dict[str, Any]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise TenraiError("Tenrai returned an unexpected response.")
-        alternate_names = item.get("alternate_names")
-        if not isinstance(alternate_names, list):
-            alternate_names = []
-        results.append(
-            {
-                "_provider": "Tenrai",
-                "name": {
-                    "full": item.get("name"),
-                    "native": None,
-                    "alternative": [
-                        name
-                        for name in alternate_names
-                        if isinstance(name, str) and name
-                    ],
-                },
-                "siteUrl": item.get("url"),
-                "description": item.get("about"),
-                "image": _cover_image(item),
-                "primaryOccupations": [],
-                "languageV2": None,
-                "favourites": item.get("favorites"),
-            }
-        )
-    return {"data": {"Page": {"staff": results}}}
-
-
-def _studio_page(payload: dict[str, Any]) -> dict[str, Any]:
-    """Translate Tenrai producers into the shared AniList Studio shape."""
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise TenraiError("Tenrai returned an unexpected response.")
-
-    results: list[dict[str, Any]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise TenraiError("Tenrai returned an unexpected response.")
-        titles = item.get("titles")
-        if not isinstance(titles, list):
-            titles = []
-        valid_titles = [
-            title
-            for title in titles
-            if isinstance(title, dict)
-            and isinstance(title.get("title"), str)
-            and title["title"]
-        ]
-        default_title = next(
-            (title for title in valid_titles if title.get("type") == "Default"),
-            valid_titles[0] if valid_titles else {},
-        )
-        results.append(
-            {
-                "_provider": "Tenrai",
-                "name": default_title.get("title"),
-                "siteUrl": item.get("url"),
-                "isAnimationStudio": None,
-                "favourites": item.get("favorites"),
-            }
-        )
-    return {"data": {"Page": {"studios": results}}}
-
-
 async def _request(
     session: ClientSession, resource: str, params: dict[str, str]
 ) -> dict[str, Any]:
@@ -364,8 +292,6 @@ async def search_catalogue(
     else:
         resource, converter = {
             "CHARACTER": ("characters", _character_page),
-            "STAFF": ("people", _staff_page),
-            "STUDIO": ("producers", _studio_page),
         }[search_type]
     return converter(await _request(session, resource, params))
 
