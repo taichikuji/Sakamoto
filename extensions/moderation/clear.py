@@ -1,8 +1,10 @@
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from discord import Interaction, Member, TextChannel, Thread, app_commands
+from discord import Interaction, Member, Message, TextChannel, Thread, app_commands
 from discord.ext import commands
+from discord.utils import time_snowflake, utcnow
 
 from extensions.core.analytics import mark_app_command_failed
 
@@ -10,6 +12,18 @@ if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
+
+
+async def _delete_messages(
+    channel: TextChannel | Thread, messages: list[Message]
+) -> None:
+    bulk_delete_after = time_snowflake(utcnow() - timedelta(days=14))
+    recent = [message for message in messages if message.id >= bulk_delete_after]
+    if recent:
+        await channel.delete_messages(recent)
+    for message in messages:
+        if message.id < bulk_delete_after:
+            await message.delete()
 
 
 class ClearCog(commands.Cog):
@@ -22,29 +36,32 @@ class ClearCog(commands.Cog):
         name="clear", description="Remove messages in bulk. Defaults to 1 message."
     )
     @app_commands.describe(
-        amount="Number of messages to scan and remove. Defaults to 1.",
+        amount="Number of messages to remove (1–100). Defaults to 1.",
         user="Only remove messages authored by this member.",
     )
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def clear(
-        self, interaction: Interaction, amount: int = 1, user: Member | None = None
+        self,
+        interaction: Interaction,
+        amount: app_commands.Range[int, 1, 100] = 1,
+        user: Member | None = None,
     ) -> None:
         """Bulk delete messages, optionally filtering by user."""
         await interaction.response.defer(ephemeral=True)
 
-        def check_message(message):
-            """Return whether a message matches the optional member filter."""
-            return user is None or message.author == user
-
         if isinstance(channel := interaction.channel, (TextChannel, Thread)):
-            deleted = await channel.purge(limit=amount, check=check_message)
             if user:
-                msg = (
-                    f":wastebasket: Scanned {amount} messages and deleted {len(deleted)} messages "
-                    f"from {user.display_name}."
-                )
+                deleted = []
+                async for message in channel.history(limit=None):
+                    if message.author == user and message.type.is_deletable():
+                        deleted.append(message)
+                        if len(deleted) == amount:
+                            break
+                await _delete_messages(channel, deleted)
+                msg = f":wastebasket: Deleted {len(deleted)} messages from {user.display_name}."
             else:
+                deleted = await channel.purge(limit=amount)
                 msg = f":wastebasket: Deleted {len(deleted)} messages."
             await interaction.followup.send(msg, ephemeral=True)
         else:
