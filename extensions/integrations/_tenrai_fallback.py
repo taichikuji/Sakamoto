@@ -6,10 +6,8 @@ response shape consumed by the shared parser.
 """
 
 from asyncio import sleep
-from datetime import UTC, datetime, time, timedelta
 from math import isfinite
 from typing import Any, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
@@ -17,15 +15,6 @@ TENRAI_URL = "https://api.tenrai.org/v1"
 MAX_RETRY_AFTER_SECONDS = 30
 MediaType = Literal["ANIME", "MANGA"]
 SearchType = Literal[MediaType, "CHARACTER"]
-_WEEKDAYS = {
-    "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
-}
 _GENRE_IDS = {
     "action": 1,
     "adventure": 2,
@@ -208,74 +197,6 @@ async def _request(
         if not isfinite(delay) or delay > MAX_RETRY_AFTER_SECONDS:
             raise TenraiError("Tenrai returned an unsafe retry delay.", 429)
         await sleep(delay)
-
-
-def _broadcast_timestamp(broadcast: Any, week_start: int, week_end: int) -> int | None:
-    """Resolve a recurring Tenrai broadcast into the requested UTC week."""
-    if not isinstance(broadcast, dict):
-        return None
-    day = broadcast.get("day")
-    broadcast_time = broadcast.get("time")
-    timezone_name = broadcast.get("timezone")
-    if not all(
-        isinstance(value, str) for value in (day, broadcast_time, timezone_name)
-    ):
-        return None
-
-    weekday = _WEEKDAYS.get(day.casefold().removesuffix("s"))
-    if weekday is None:
-        return None
-    try:
-        parsed_time = time.fromisoformat(broadcast_time)
-        timezone = ZoneInfo(timezone_name)
-    except ValueError, ZoneInfoNotFoundError:
-        return None
-
-    local_start = datetime.fromtimestamp(week_start, UTC).astimezone(timezone)
-    broadcast_date = local_start.date() + timedelta(
-        days=(weekday - local_start.weekday()) % 7
-    )
-    candidate = datetime.combine(broadcast_date, parsed_time, timezone)
-    if candidate.timestamp() < week_start:
-        candidate += timedelta(days=7)
-    timestamp = int(candidate.timestamp())
-    return timestamp if timestamp < week_end else None
-
-
-async def weekly_schedule(
-    session: ClientSession, week_start: int, week_end: int
-) -> list[dict[str, Any]]:
-    """Return Tenrai's weekly broadcasts in the shared schedule shape."""
-    page = 1
-    results: list[dict[str, Any]] = []
-    while True:
-        payload = await _request(
-            session,
-            "schedules",
-            {"page": str(page), "limit": "50", "sfw": "true"},
-        )
-        data = payload.get("data")
-        pagination = payload.get("pagination")
-        if not isinstance(data, list) or not isinstance(pagination, dict):
-            raise TenraiError("Tenrai returned an unexpected response.")
-
-        for item in data:
-            if not isinstance(item, dict):
-                raise TenraiError("Tenrai returned an unexpected response.")
-            results.append(
-                {
-                    "_provider": "Tenrai",
-                    "airingAt": _broadcast_timestamp(
-                        item.get("broadcast"), week_start, week_end
-                    ),
-                    "episode": None,
-                    "media": {"title": _titles(item)},
-                }
-            )
-
-        if pagination.get("has_next_page") is not True:
-            return results
-        page += 1
 
 
 async def search_catalogue(
