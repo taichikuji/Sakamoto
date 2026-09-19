@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 from discord import Interaction, app_commands
 from discord.ext import commands
 
+from extensions.core.analytics import is_application_owner
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -17,10 +19,9 @@ class CloseCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="shutdown", description="Shuts down the bot gracefully.")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.check(is_application_owner)
     async def shutdown_bot(self, interaction: Interaction) -> None:
-        """Shutdown command for administrators."""
+        """Shutdown command for the bot owner."""
         assert interaction.client.user is not None, (
             "interaction.client.user is None in shutdown_bot!"
         )
@@ -37,9 +38,9 @@ class CloseCog(commands.Cog):
         self, interaction: Interaction, error: app_commands.AppCommandError
     ) -> None:
         """Handle errors for the shutdown command."""
-        if isinstance(error, app_commands.errors.MissingPermissions):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
-                ":x: You need Administrator permissions to shut down the bot.",
+                ":x: Only the bot owner can run this command.",
                 ephemeral=True,
             )
         else:

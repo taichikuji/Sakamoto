@@ -50,14 +50,12 @@ async def test_loader_command_reports_unexpected_extension_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_loader_permission_error_is_ephemeral():
+async def test_loader_owner_error_is_ephemeral():
     interaction = _interaction()
     cog = LoaderCog(SimpleNamespace())
 
-    await cog.on_loader_error(
-        interaction, app_commands.errors.MissingPermissions(["administrator"])
-    )
+    await cog.on_loader_error(interaction, app_commands.CheckFailure())
 
     interaction.response.send_message.assert_awaited_once_with(
-        ":x: You need Administrator permissions to run this command.", ephemeral=True
+        ":x: Only the bot owner can run this command.", ephemeral=True
     )
