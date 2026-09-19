@@ -269,7 +269,6 @@ class MusicCog(commands.Cog):
             "title",
             "duration",
             "duration_string",
-            "thumbnail",
         )
         result = {key: info[key] for key in fields if key in info}
         if "entries" in info:
@@ -396,7 +395,6 @@ class MusicCog(commands.Cog):
             or self._format_duration(track_info.get("duration")),
             stream_url=track_info.get("url"),
             refresh_stream=self.refresh_stream_url,
-            thumbnail_url=track_info.get("thumbnail"),
         )
 
     def playlist_items(self, entries: list[dict]) -> list[QueueItem]:
@@ -474,8 +472,6 @@ class MusicCog(commands.Cog):
             description="\n\n".join(sections),
             color=self.bot.color,
         )
-        if current and current.thumbnail_url:
-            embed.set_thumbnail(url=current.thumbnail_url)
         queued_count = len(queued)
         footer = f"{queued_count} track{'s' if queued_count != 1 else ''} queued"
         if queued_count > max_display:
