@@ -42,14 +42,12 @@ async def test_shutdown_logs_close_failure_without_raising(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_permission_error_is_ephemeral():
+async def test_shutdown_owner_error_is_ephemeral():
     interaction = _interaction(AsyncMock())
     cog = CloseCog(SimpleNamespace())
 
-    await cog.on_shutdown_error(
-        interaction, app_commands.errors.MissingPermissions(["administrator"])
-    )
+    await cog.on_shutdown_error(interaction, app_commands.CheckFailure())
 
     interaction.response.send_message.assert_awaited_once_with(
-        ":x: You need Administrator permissions to shut down the bot.", ephemeral=True
+        ":x: Only the bot owner can run this command.", ephemeral=True
     )

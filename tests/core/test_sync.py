@@ -126,7 +126,7 @@ async def test_sync_rejects_dms_silently(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("is_slash", [True, False])
-async def test_on_sync_error_sends_missing_permission_message(is_slash):
+async def test_on_sync_error_sends_owner_message(is_slash):
     interaction = SimpleNamespace(
         response=SimpleNamespace(send_message=AsyncMock()),
     )
@@ -136,17 +136,17 @@ async def test_on_sync_error_sends_missing_permission_message(is_slash):
     )
     cog = SyncCog(SimpleNamespace(tree=SimpleNamespace(sync=AsyncMock())))
 
-    await cog.on_sync_error(ctx, commands.MissingPermissions(["administrator"]))
+    await cog.on_sync_error(ctx, commands.NotOwner())
 
     if is_slash:
         interaction.response.send_message.assert_awaited_once_with(
-            ":x: You need Administrator permissions to run this command.",
+            ":x: Only the bot owner can run this command.",
             ephemeral=True,
         )
         ctx.send.assert_not_awaited()
     else:
         ctx.send.assert_awaited_once_with(
-            ":x: You need Administrator permissions to run this command."
+            ":x: Only the bot owner can run this command."
         )
 
 

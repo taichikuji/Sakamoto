@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 from discord import Interaction, app_commands
 from discord.ext import commands
 
+from extensions.core.analytics import is_application_owner
+
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -21,8 +23,7 @@ class LoaderCog(commands.Cog):
     @app_commands.describe(
         extension="Extension path relative to `extensions.`, such as `audio.music`."
     )
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.check(is_application_owner)
     async def load(self, interaction: Interaction, extension: str) -> None:
         """Load a bot extension."""
         try:
@@ -52,8 +53,7 @@ class LoaderCog(commands.Cog):
 
     @app_commands.command(name="unload", description="Unload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.check(is_application_owner)
     async def unload(self, interaction: Interaction, extension: str) -> None:
         """Unload a bot extension."""
         try:
@@ -70,8 +70,7 @@ class LoaderCog(commands.Cog):
 
     @app_commands.command(name="reload", description="Reload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.check(is_application_owner)
     async def reload(self, interaction: Interaction, extension: str) -> None:
         """Reload a bot extension."""
         try:
@@ -106,9 +105,9 @@ class LoaderCog(commands.Cog):
         self, interaction: Interaction, error: app_commands.AppCommandError
     ) -> None:
         """Handle errors for the loader commands."""
-        if isinstance(error, app_commands.errors.MissingPermissions):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
-                ":x: You need Administrator permissions to run this command.",
+                ":x: Only the bot owner can run this command.",
                 ephemeral=True,
             )
         else:
