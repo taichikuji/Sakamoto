@@ -1,7 +1,7 @@
 import logging
 from typing import TYPE_CHECKING
 
-from discord import Guild, HTTPException, app_commands
+from discord import Guild, HTTPException
 from discord.ext import commands
 
 if TYPE_CHECKING:
@@ -30,11 +30,10 @@ class SyncCog(commands.Cog):
 
     @commands.hybrid_command(
         name="sync",
-        description="Sync application commands globally and to current guild (Admin Only).",
+        description="Sync application commands globally and to current guild (Bot Owner Only).",
     )
-    @app_commands.default_permissions(administrator=True)
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
+    @commands.is_owner()
     async def sync(self, ctx: commands.Context) -> None:
         """Sync commands globally and guild-specific."""
         if ctx.interaction:
@@ -56,8 +55,8 @@ class SyncCog(commands.Cog):
         """Handle errors for the sync command."""
         if isinstance(error, commands.NoPrivateMessage):
             return
-        if isinstance(error, commands.MissingPermissions):
-            msg = ":x: You need Administrator permissions to run this command."
+        if isinstance(error, commands.NotOwner):
+            msg = ":x: Only the bot owner can run this command."
             if ctx.interaction:
                 await ctx.interaction.response.send_message(msg, ephemeral=True)
             else:
