@@ -1199,12 +1199,7 @@ async def test_enqueue_or_play_rejects_when_queue_is_full():
 async def test_queue_displays_playback_state():
     interaction = _make_interaction(user=object(), guild_id=1)
     cog = MusicCog(_make_bot())
-    current = QueueItem(
-        "https://example.test/current",
-        "Current *Track*",
-        "2:00",
-        thumbnail_url="https://example.test/thumbnail.jpg",
-    )
+    current = QueueItem("https://example.test/current", "Current *Track*", "2:00")
     _add_session(
         cog.engine,
         DummyVoiceClient(),
@@ -1228,7 +1223,6 @@ async def test_queue_displays_playback_state():
     assert "`10.` Queued Track 10 [`3:00`]" in embed.description
     assert "Queued Track 11" not in embed.description
     assert embed.fields == []
-    assert embed.thumbnail.url == "https://example.test/thumbnail.jpg"
     assert embed.footer.text == "11 tracks queued • 1 not shown"
     assert isinstance(view, MusicControls)
     assert [str(item.emoji) for item in view.children] == ["⏯️", "⏹️", "⏭️", "🔀"]
@@ -1402,12 +1396,7 @@ async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
 
 
 def test_search_source_retains_only_playback_metadata(monkeypatch):
-    track = {
-        "title": "Track",
-        "url": "stream",
-        "duration": 60,
-        "thumbnail": "https://example.test/thumbnail.jpg",
-    }
+    track = {"title": "Track", "url": "stream", "duration": 60}
     raw = {
         "entries": [
             None,
