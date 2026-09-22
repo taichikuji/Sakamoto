@@ -44,24 +44,91 @@ def _make_interaction(*, user, guild):
 
 
 @pytest.mark.asyncio
-async def test_votekick_view_duplicate_votes_are_rejected():
+async def test_votekick_view_duplicate_votes_are_rejected(monkeypatch):
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
     bot = SimpleNamespace(
         loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None
     )
-    author = DummyMember(1)
-    target = DummyMember(2)
-    view = VotekickView(bot, required_votes=2, author=author, target=target)
-    voter = DummyMember(10)
+    channel = object()
+    author = DummyMember(1, channel=channel)
+    target = DummyMember(2, channel=channel)
+    view = VotekickView(bot, 2, author, target, channel)
+    voter = DummyMember(10, channel=channel)
     interaction = _make_interaction(user=voter, guild=object())
 
+    assert await view.interaction_check(interaction) is True
     await view.children[0].callback(interaction)
-    await view.children[0].callback(interaction)
-    await view.children[1].callback(interaction)
+    assert await view.interaction_check(interaction) is False
 
     assert view.has_voted(voter.id) is True
+    assert view.no_votes == set()
     interaction.response.send_message.assert_awaited_with(
         ":x: You have already voted.", ephemeral=True
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("button_index", "vote_set"), [(0, "yes_votes"), (1, "no_votes")]
+)
+async def test_votekick_view_allows_channel_members_to_vote(
+    monkeypatch, button_index, vote_set
+):
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
+    channel = object()
+    view = VotekickView(
+        SimpleNamespace(),
+        2,
+        DummyMember(1, channel=channel),
+        DummyMember(2, channel=channel),
+        channel,
+    )
+    voter = DummyMember(3, channel=channel)
+    interaction = _make_interaction(user=voter, guild=object())
+
+    if await view.interaction_check(interaction):
+        await view.children[button_index].callback(interaction)
+
+    assert getattr(view, vote_set) == {voter.id}
+    interaction.response.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("button_index", [0, 1])
+@pytest.mark.parametrize(
+    "case", ["not_member", "outside_channel", "left_channel", "target", "target_left"]
+)
+async def test_votekick_view_rejects_unauthorized_voters(
+    monkeypatch, case, button_index
+):
+    monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
+    channel = object()
+    target = DummyMember(2, channel=channel)
+    view = VotekickView(
+        SimpleNamespace(), 2, DummyMember(1, channel=channel), target, channel
+    )
+    voter = DummyMember(3, channel=channel)
+
+    if case == "not_member":
+        voter = SimpleNamespace(id=3, voice=SimpleNamespace(channel=channel))
+    elif case == "outside_channel":
+        voter = DummyMember(3, channel=object())
+    elif case == "left_channel":
+        voter = DummyMember(3)
+    elif case == "target":
+        voter = target
+    elif case == "target_left":
+        target.voice = None
+
+    interaction = _make_interaction(user=voter, guild=object())
+
+    if await view.interaction_check(interaction):
+        await view.children[button_index].callback(interaction)
+
+    assert view.yes_votes == set()
+    assert view.no_votes == set()
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.kwargs == {"ephemeral": True}
 
 
 @pytest.mark.asyncio
@@ -70,7 +137,11 @@ async def test_votekick_view_timeout_updates_embed_and_disables_buttons():
         loop=SimpleNamespace(create_task=MagicMock()), get_cog=lambda _name: None
     )
     view = VotekickView(
-        bot, required_votes=2, author=DummyMember(1), target=DummyMember(2)
+        bot,
+        required_votes=2,
+        author=DummyMember(1),
+        target=DummyMember(2),
+        channel=object(),
     )
     embed = DummyEmbed()
     message = SimpleNamespace(embeds=[embed], edit=AsyncMock())
@@ -98,7 +169,13 @@ async def test_yes_button_successful_vote_kicks_target_and_records_ban(monkeypat
     target = DummyMember(22, channel=original_channel)
     target.move_to = AsyncMock()
     author = DummyMember(11)
-    view = VotekickView(bot, required_votes=1, author=author, target=target)
+    view = VotekickView(
+        bot,
+        required_votes=1,
+        author=author,
+        target=target,
+        channel=original_channel,
+    )
 
     embed = DummyEmbed()
     message = SimpleNamespace(embeds=[embed], edit=AsyncMock())
@@ -201,6 +278,7 @@ async def test_votekick_command_happy_path_tracks_and_clears_state(monkeypatch):
     sent_view = interaction.response.send_message.await_args.kwargs["view"]
     assert isinstance(sent_view, VotekickView)
     assert sent_view.required_votes == 2
+    assert sent_view.channel is voice_channel
     assert sent_view.message is sent_message
     assert target.id not in cog.votekicks
 
