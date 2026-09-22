@@ -12,6 +12,8 @@ from discord import (
     Member,
     Message,
     NotFound,
+    StageChannel,
+    VoiceChannel,
     app_commands,
 )
 from discord.ext import commands
@@ -29,13 +31,19 @@ class VotekickView(View):
     """Interactive vote controls for a Voice Votekick."""
 
     def __init__(
-        self, bot: Sakamoto, required_votes: int, author: Member, target: Member
+        self,
+        bot: Sakamoto,
+        required_votes: int,
+        author: Member,
+        target: Member,
+        channel: VoiceChannel | StageChannel,
     ):
         super().__init__(timeout=60.0)
         self.bot = bot
         self.required_votes = required_votes
         self.author = author
         self.target = target
+        self.channel = channel
         self.yes_votes: set[int] = set()
         self.no_votes: set[int] = set()
         self.message: Message | None = None
@@ -43,6 +51,42 @@ class VotekickView(View):
     def has_voted(self, user_id: int) -> bool:
         """Return whether a member has already voted."""
         return user_id in self.yes_votes or user_id in self.no_votes
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        """Authorize a vote against the original voice channel."""
+        # Voice membership is mutable, so authorize every button interaction.
+        user = interaction.user
+        if (
+            not isinstance(user, Member)
+            or not user.voice
+            or user.voice.channel != self.channel
+        ):
+            await interaction.response.send_message(
+                ":x: You must be in the original voice channel to vote.",
+                ephemeral=True,
+            )
+            return False
+
+        if user.id == self.target.id:
+            await interaction.response.send_message(
+                ":x: The votekick target cannot vote.", ephemeral=True
+            )
+            return False
+
+        if not self.target.voice or self.target.voice.channel != self.channel:
+            await interaction.response.send_message(
+                ":x: The votekick target is no longer in the voice channel.",
+                ephemeral=True,
+            )
+            return False
+
+        if self.has_voted(user.id):
+            await interaction.response.send_message(
+                ":x: You have already voted.", ephemeral=True
+            )
+            return False
+
+        return True
 
     def disable_all_buttons(self):
         """Disable every vote control."""
@@ -82,12 +126,6 @@ class VotekickView(View):
     @button(label="Yes", style=ButtonStyle.green)
     async def yes_button(self, interaction: Interaction, _button: Button):
         """Record an affirmative vote and complete a successful Votekick."""
-        if self.has_voted(interaction.user.id):
-            await interaction.response.send_message(
-                ":x: You have already voted.", ephemeral=True
-            )
-            return
-
         self.yes_votes.add(interaction.user.id)
         await self.update_embed(interaction)
 
@@ -119,12 +157,6 @@ class VotekickView(View):
     @button(label="No", style=ButtonStyle.red)
     async def no_button(self, interaction: Interaction, _button: Button):
         """Record a negative vote."""
-        if self.has_voted(interaction.user.id):
-            await interaction.response.send_message(
-                ":x: You have already voted.", ephemeral=True
-            )
-            return
-
         self.no_votes.add(interaction.user.id)
         await self.update_embed(interaction)
 
@@ -300,7 +332,7 @@ class ModerationCog(commands.Cog):
         )
         embed.set_footer(text="The vote will end in 60 seconds.")
 
-        view = VotekickView(self.bot, required_votes, author, member)
+        view = VotekickView(self.bot, required_votes, author, member, voice_channel)
 
         await interaction.response.send_message(embed=embed, view=view)
         message = await interaction.original_response()
