@@ -6,14 +6,6 @@ services:
     mem_limit: 512m
     # Matching the memory limit disables container swap.
     memswap_limit: 512m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-      - /home/sakamoto/.cache:uid=10001,gid=10001,mode=0700
     container_name: sakamoto
     environment:
       - TOKEN=${TOKEN}

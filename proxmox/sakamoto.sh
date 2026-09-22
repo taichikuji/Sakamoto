@@ -39,22 +39,9 @@ function update_script() {
   msg_ok "Base system updated"
 
   msg_info "Updating Sakamoto"
-  if ! id -u sakamoto >/dev/null 2>&1; then
-    $STD useradd --system --create-home --home-dir /var/lib/sakamoto --shell /usr/sbin/nologin sakamoto
-  fi
-  $STD chown -R sakamoto:sakamoto /opt/Sakamoto
-  $STD install -d -o sakamoto -g sakamoto -m 700 /opt/Sakamoto/data
-  if [[ -f /opt/Sakamoto/.env ]]; then
-    $STD chown sakamoto:sakamoto /opt/Sakamoto/.env
-    $STD chmod 600 /opt/Sakamoto/.env
-  fi
-  $STD runuser -u sakamoto -- git -C /opt/Sakamoto pull --ff-only
-  $STD runuser -u sakamoto -- env PIPENV_VENV_IN_PROJECT=1 pipenv install --deploy
-  if ! grep -q '^User=sakamoto$' /etc/systemd/system/Sakamoto.service; then
-    $STD sed -i '/^Type=simple$/a User=sakamoto\nGroup=sakamoto' /etc/systemd/system/Sakamoto.service
-  fi
-  $STD sed -i 's|^ExecStart=.*|ExecStart=/opt/Sakamoto/.venv/bin/python main.py|' /etc/systemd/system/Sakamoto.service
-  $STD systemctl daemon-reload
+  cd /opt/Sakamoto
+  $STD git pull
+  $STD pipenv install --deploy
   msg_ok "Sakamoto updated"
 
   msg_info "Restarting Sakamoto service"
@@ -86,16 +73,12 @@ msg_ok "Sakamoto dependencies installed"
 
 msg_info "Cloning Sakamoto repository"
 $STD lxc-attach -n "$CTID" -- bash -c "\
-  useradd --system --create-home --home-dir /var/lib/sakamoto --shell /usr/sbin/nologin sakamoto && \
-  git clone https://github.com/taichikuji/Sakamoto.git /opt/Sakamoto && \
-  chown -R sakamoto:sakamoto /opt/Sakamoto"
+  git clone https://github.com/taichikuji/Sakamoto.git /opt/Sakamoto"
 msg_ok "Sakamoto repository cloned"
 
 msg_info "Installing Python packages"
 $STD lxc-attach -n "$CTID" -- bash -c "\
-  cd /opt/Sakamoto && \
-  runuser -u sakamoto -- env PIPENV_VENV_IN_PROJECT=1 pipenv install --deploy && \
-  install -d -o sakamoto -g sakamoto -m 700 /opt/Sakamoto/data"
+  cd /opt/Sakamoto && pipenv install --deploy"
 msg_ok "Python packages installed"
 
 msg_info "Setting up Sakamoto service"
@@ -107,11 +90,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=sakamoto
-Group=sakamoto
 WorkingDirectory=/opt/Sakamoto
 EnvironmentFile=/opt/Sakamoto/.env
-ExecStart=/opt/Sakamoto/.venv/bin/python main.py
+ExecStart=/usr/bin/pipenv run python main.py
 Restart=on-failure
 RestartSec=10
 
@@ -129,8 +110,6 @@ TOKEN=your_discord_bot_token_here
 ENVEOF"
 
 $STD lxc-attach -n "$CTID" -- bash -c "\
-  chown sakamoto:sakamoto /opt/Sakamoto/.env && \
-  chmod 600 /opt/Sakamoto/.env && \
   systemctl daemon-reload && \
   systemctl enable Sakamoto"
 msg_ok "Sakamoto service configured"
