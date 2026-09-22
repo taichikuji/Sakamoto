@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING
 
-from discord import Message
+from discord import AllowedMentions, Message
 from discord.ext import commands
+from discord.utils import escape_markdown
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -38,7 +39,10 @@ class ReplaceCog(commands.Cog):
         if "http://" not in message.content and "https://" not in message.content:
             return
         if (fixed := self.replace_text(message.content)) != message.content:
-            await message.channel.send(fixed)
+            await message.channel.send(
+                escape_markdown(fixed),
+                allowed_mentions=AllowedMentions.none(),
+            )
 
 
 async def setup(bot: Sakamoto):
