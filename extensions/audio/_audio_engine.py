@@ -7,6 +7,7 @@ from random import shuffle
 from typing import TYPE_CHECKING
 
 from discord import (
+    AllowedMentions,
     FFmpegOpusAudio,
     Interaction,
     Member,
@@ -16,6 +17,7 @@ from discord import (
     VoiceState,
 )
 from discord.abc import Messageable
+from discord.utils import escape_markdown
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -105,6 +107,7 @@ class AudioEngine:
             return False
 
         voice_client = session.voice_client
+        title = escape_markdown(item.title, as_needed=True)
         if voice_client.is_playing() or voice_client.is_paused() or session.queue:
             if len(session.queue) >= 50:
                 await followup(":x: Queue is full (50 items).", ephemeral=True)
@@ -115,14 +118,16 @@ class AudioEngine:
             session.queue.append(item)
             await followup(
                 queue_message
-                or f":ballot_box_with_check: Added to queue: **{item.title}** [{item.duration}]"
+                or f":ballot_box_with_check: Added to queue: **{title}** [{item.duration}]",
+                allowed_mentions=AllowedMentions.none(),
             )
             return True
 
         if await self.play_song(guild_id, item):
             await followup(
                 now_playing_message
-                or f":notes: Now playing: **{item.title}** [{item.duration}]"
+                or f":notes: Now playing: **{title}** [{item.duration}]",
+                allowed_mentions=AllowedMentions.none(),
             )
             return True
         else:
@@ -159,9 +164,11 @@ class AudioEngine:
         if not voice_client.is_playing() and not voice_client.is_paused():
             first = session.queue.popleft()
             if await self.play_song(guild_id, first):
+                title = escape_markdown(first.title, as_needed=True)
                 await followup(
-                    f":notes: Started playlist. Now playing: **{first.title}**\n"
-                    f":ballot_box_with_check: Added {len(added_items) - 1} tracks to the queue."
+                    f":notes: Started playlist. Now playing: **{title}**\n"
+                    f":ballot_box_with_check: Added {len(added_items) - 1} tracks to the queue.",
+                    allowed_mentions=AllowedMentions.none(),
                 )
                 return True
             else:
@@ -209,13 +216,16 @@ class AudioEngine:
         session = self.sessions.get(guild_id)
         if session and session.command_channel:
             try:
+                title = escape_markdown(item.title, as_needed=True)
                 if item.duration == "LIVE":
                     await session.command_channel.send(
-                        f":radio: Playing **{item.title}** on Radio Garden"
+                        f":radio: Playing **{title}** on Radio Garden",
+                        allowed_mentions=AllowedMentions.none(),
                     )
                 else:
                     await session.command_channel.send(
-                        f":notes: Now playing: **{item.title}** [{item.duration}]"
+                        f":notes: Now playing: **{title}** [{item.duration}]",
+                        allowed_mentions=AllowedMentions.none(),
                     )
             except Exception as error:
                 logger.warning(

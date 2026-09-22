@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from discord.utils import escape_markdown
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -1132,6 +1133,48 @@ async def test_enqueue_or_play_queues_when_playing():
     )
     assert succeeded is True
     followup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_media_title_cannot_inject_mentions_or_markdown():
+    vc = DummyVoiceClient(connected=True, playing=True)
+    cog = AudioEngine(_make_bot())
+    _add_session(cog, vc)
+    followup = AsyncMock()
+    title = "@everyone <@123> <@&456> **bold** _italic_"
+
+    await cog.enqueue_or_play(
+        1,
+        QueueItem("https://example.test/track", title, "3:00"),
+        followup=followup,
+    )
+
+    sent = followup.await_args
+    assert escape_markdown(title, as_needed=True) in sent.args[0]
+    allowed_mentions = sent.kwargs["allowed_mentions"]
+    assert allowed_mentions.everyone is False
+    assert allowed_mentions.users is False
+    assert allowed_mentions.roles is False
+
+
+@pytest.mark.asyncio
+async def test_automatic_media_announcement_is_safe():
+    channel = SimpleNamespace(send=AsyncMock())
+    cog = AudioEngine(_make_bot())
+    _add_session(cog, DummyVoiceClient(connected=True), command_channel=channel)
+    cog.play_song = AsyncMock(return_value=True)
+    title = "@everyone <@123> <@&456> **bold** _italic_"
+
+    await cog.play_next_track_and_announce(
+        1, QueueItem("https://example.test/track", title, "3:00")
+    )
+
+    sent = channel.send.await_args
+    assert escape_markdown(title, as_needed=True) in sent.args[0]
+    allowed_mentions = sent.kwargs["allowed_mentions"]
+    assert allowed_mentions.everyone is False
+    assert allowed_mentions.users is False
+    assert allowed_mentions.roles is False
 
 
 @pytest.mark.asyncio

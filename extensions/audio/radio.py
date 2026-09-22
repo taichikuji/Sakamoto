@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 
 from discord import Interaction, Member, app_commands
 from discord.ext import commands
+from discord.utils import escape_markdown
 
 from extensions.core.analytics import mark_app_command_failed
 
@@ -152,6 +153,7 @@ class RadioCog(
             return
 
         self.engine.set_command_channel(guild_id, channel)
+        title = escape_markdown(station.title, as_needed=True)
 
         if not await self.engine.enqueue_or_play(
             guild_id,
@@ -163,10 +165,10 @@ class RadioCog(
             ),
             followup=interaction.followup.send,
             now_playing_message=(
-                f":radio: Now playing: **{station.title}** using radio source"
+                f":radio: Now playing: **{title}** using radio source"
             ),
             queue_message=(
-                f":ballot_box_with_check: Added to queue: :radio: **{station.title}** [LIVE]"
+                f":ballot_box_with_check: Added to queue: :radio: **{title}** [LIVE]"
             ),
         ):
             mark_app_command_failed(interaction)
