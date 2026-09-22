@@ -1,4 +1,4 @@
-FROM python:3.14-slim AS builder
+FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS builder
 
 WORKDIR /usr/src/app
 
@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir pipenv
 COPY Pipfile Pipfile.lock ./
 RUN pipenv requirements --hash > requirements.txt
 
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2
 
 # Keep unbuffered if want more logs, keep buffered if want more performance
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,7 +24,7 @@ RUN --mount=type=bind,from=builder,source=/usr/src/app/requirements.txt,target=/
     pip install --no-cache-dir --no-compile --require-hashes -r /tmp/requirements.txt && \
     python -m pip uninstall -y pip
 
-COPY --from=mwader/static-ffmpeg:9.0 /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=mwader/static-ffmpeg:9.0@sha256:b90574a4e2ae62b763c39c384526689e7eb435da6398f4fb3f6c3f1c6a14ce33 /ffmpeg /usr/local/bin/ffmpeg
 # COPY --from=builder /usr/bin/qjs /usr/local/bin/qjs
 
 RUN groupadd --gid 10001 sakamoto && \
