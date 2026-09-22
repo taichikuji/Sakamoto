@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from discord.utils import escape_markdown
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -99,11 +98,8 @@ async def test_on_message_sends_rewritten_text_when_content_changes():
 
     sent = channel.send.await_args
     assert sent.args == (
-        escape_markdown(
-            "https://fixupx.com/alice/status/12345 @everyone <@123> <@&456> "
-            "**bold** _italic_",
-            as_needed=True,
-        ),
+        r"https://fixupx.com/alice/status/12345 @everyone <@123> <@&456> "
+        r"\*\*bold\*\* \_italic\_",
     )
     allowed_mentions = sent.kwargs["allowed_mentions"]
     assert allowed_mentions.everyone is False

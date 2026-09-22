@@ -153,7 +153,7 @@ class RadioCog(
             return
 
         self.engine.set_command_channel(guild_id, channel)
-        title = escape_markdown(station.title, as_needed=True)
+        title = escape_markdown(station.title)
 
         if not await self.engine.enqueue_or_play(
             guild_id,

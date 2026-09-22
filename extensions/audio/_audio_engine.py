@@ -107,7 +107,7 @@ class AudioEngine:
             return False
 
         voice_client = session.voice_client
-        title = escape_markdown(item.title, as_needed=True)
+        title = escape_markdown(item.title)
         if voice_client.is_playing() or voice_client.is_paused() or session.queue:
             if len(session.queue) >= 50:
                 await followup(":x: Queue is full (50 items).", ephemeral=True)
@@ -164,7 +164,7 @@ class AudioEngine:
         if not voice_client.is_playing() and not voice_client.is_paused():
             first = session.queue.popleft()
             if await self.play_song(guild_id, first):
-                title = escape_markdown(first.title, as_needed=True)
+                title = escape_markdown(first.title)
                 await followup(
                     f":notes: Started playlist. Now playing: **{title}**\n"
                     f":ballot_box_with_check: Added {len(added_items) - 1} tracks to the queue.",
@@ -216,7 +216,7 @@ class AudioEngine:
         session = self.sessions.get(guild_id)
         if session and session.command_channel:
             try:
-                title = escape_markdown(item.title, as_needed=True)
+                title = escape_markdown(item.title)
                 if item.duration == "LIVE":
                     await session.command_channel.send(
                         f":radio: Playing **{title}** on Radio Garden",

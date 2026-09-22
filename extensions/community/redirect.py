@@ -40,7 +40,7 @@ class ReplaceCog(commands.Cog):
             return
         if (fixed := self.replace_text(message.content)) != message.content:
             await message.channel.send(
-                escape_markdown(fixed, as_needed=True),
+                escape_markdown(fixed),
                 allowed_mentions=AllowedMentions.none(),
             )
 

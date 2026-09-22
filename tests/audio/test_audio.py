@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from discord.utils import escape_markdown
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -1150,7 +1149,7 @@ async def test_media_title_cannot_inject_mentions_or_markdown():
     )
 
     sent = followup.await_args
-    assert escape_markdown(title, as_needed=True) in sent.args[0]
+    assert r"@everyone <@123> <@&456> \*\*bold\*\* \_italic\_" in sent.args[0]
     allowed_mentions = sent.kwargs["allowed_mentions"]
     assert allowed_mentions.everyone is False
     assert allowed_mentions.users is False
@@ -1170,7 +1169,7 @@ async def test_automatic_media_announcement_is_safe():
     )
 
     sent = channel.send.await_args
-    assert escape_markdown(title, as_needed=True) in sent.args[0]
+    assert r"@everyone <@123> <@&456> \*\*bold\*\* \_italic\_" in sent.args[0]
     allowed_mentions = sent.kwargs["allowed_mentions"]
     assert allowed_mentions.everyone is False
     assert allowed_mentions.users is False
