@@ -24,6 +24,11 @@ export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 
 By default, Docker Compose builds Sakamoto locally.
 
+The Compose service runs as the image's unprivileged `sakamoto` user, drops all
+Linux capabilities, prevents privilege escalation, and uses a read-only root
+filesystem. SQLite remains writable in the `sakamoto_db` volume; temporary files
+and the yt-dlp cache use in-memory filesystems.
+
 To enable automatic updates, uncomment the published `ghcr.io/taichikuji/sakamoto:latest` image, the Watchtower label, and the `updater` service in `docker-compose.yml`. The updater uses the maintained `nickfedor/watchtower` fork, only watches labelled containers, and removes old images after successful updates.
 
 Watchtower checks daily at midnight UTC by default. Override its six-field cron expression with `WATCHTOWER_SCHEDULE`.
