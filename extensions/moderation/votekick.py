@@ -34,27 +34,20 @@ class VotekickView(View):
         self,
         bot: Sakamoto,
         required_votes: int,
-        author: Member,
         target: Member,
         channel: VoiceChannel | StageChannel,
     ):
         super().__init__(timeout=60.0)
         self.bot = bot
         self.required_votes = required_votes
-        self.author = author
         self.target = target
         self.channel = channel
         self.yes_votes: set[int] = set()
         self.no_votes: set[int] = set()
         self.message: Message | None = None
 
-    def has_voted(self, user_id: int) -> bool:
-        """Return whether a member has already voted."""
-        return user_id in self.yes_votes or user_id in self.no_votes
-
     async def interaction_check(self, interaction: Interaction) -> bool:
         """Authorize a vote against the original voice channel."""
-        # Voice membership is mutable, so authorize every button interaction.
         user = interaction.user
         if (
             not isinstance(user, Member)
@@ -80,7 +73,7 @@ class VotekickView(View):
             )
             return False
 
-        if self.has_voted(user.id):
+        if user.id in self.yes_votes or user.id in self.no_votes:
             await interaction.response.send_message(
                 ":x: You have already voted.", ephemeral=True
             )
@@ -332,7 +325,7 @@ class ModerationCog(commands.Cog):
         )
         embed.set_footer(text="The vote will end in 60 seconds.")
 
-        view = VotekickView(self.bot, required_votes, author, member, voice_channel)
+        view = VotekickView(self.bot, required_votes, member, voice_channel)
 
         await interaction.response.send_message(embed=embed, view=view)
         message = await interaction.original_response()
