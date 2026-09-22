@@ -1,7 +1,5 @@
 import logging
 from asyncio import Future, TimerHandle, gather, get_running_loop
-from ipaddress import ip_address
-from socket import SOCK_STREAM, getaddrinfo
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -227,16 +225,13 @@ class MusicCog(commands.Cog):
         except Exception as error:
             if not was_connected:
                 await self.engine.disconnect_and_cleanup(guild_id)
-            logger.error("Failed to retrieve audio for %r", query, exc_info=error)
             await interaction.followup.send(
-                ":x: Failed to retrieve audio from that URL or search.", ephemeral=True
+                f":x: Failed to retrieve audio. Error: {error}", ephemeral=True
             )
             mark_app_command_failed(interaction)
 
     def search_source(self, query: str) -> dict:
         """Resolve one complete result, or a flat playlist."""
-        if query.strip().lower().startswith(("http://", "https://")):
-            self._validate_public_url(query)
         is_url = self._is_url(query)
         options: dict[str, Any] = {
             "format": "ba[acodec=opus]/ba[ext=m4a]/bestaudio/best",
@@ -347,26 +342,8 @@ class MusicCog(commands.Cog):
 
     @staticmethod
     def _is_url(query: str) -> bool:
-        try:
-            parsed = urlparse(query.strip())
-        except ValueError:
-            return False
+        parsed = urlparse(query.strip())
         return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-    @staticmethod
-    def _validate_public_url(query: str) -> None:
-        try:
-            parsed = urlparse(query.strip())
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-                raise ValueError
-            addresses = getaddrinfo(parsed.hostname, parsed.port, type=SOCK_STREAM)
-        except (OSError, ValueError) as error:
-            raise ValueError("Invalid or unavailable URL.") from error
-        resolved = [ip_address(address[4][0].split("%", 1)[0]) for address in addresses]
-        if not resolved or any(
-            not address.is_global or address.is_multicast for address in resolved
-        ):
-            raise ValueError("URLs must resolve only to public addresses.")
 
     @staticmethod
     def _first_track(info: dict) -> dict:
