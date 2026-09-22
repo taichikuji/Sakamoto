@@ -804,7 +804,7 @@ async def test_play_reports_voice_connection_exception(monkeypatch):
 
     cog.engine.enqueue_or_play.assert_not_awaited()
     interaction.followup.send.assert_awaited_once_with(
-        ":x: Failed to retrieve audio. Error: connection failed", ephemeral=True
+        ":x: Failed to retrieve audio from that URL or search.", ephemeral=True
     )
 
 
@@ -826,6 +826,9 @@ async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
     connected_client.disconnect.assert_awaited_once()
     assert cog.engine.sessions == {}
     assert interaction.command_failed is True
+    interaction.followup.send.assert_awaited_once_with(
+        ":x: Failed to retrieve audio from that URL or search.", ephemeral=True
+    )
     interaction.client.dispatch.assert_called_once_with(
         "app_command_failure", interaction, interaction.command
     )
@@ -884,6 +887,8 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
     ]
     youtube_dl = MagicMock(return_value=ydl)
     monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
+    resolver = MagicMock()
+    monkeypatch.setattr("extensions.audio.music.getaddrinfo", resolver)
     cog = MusicCog(_make_bot())
 
     assert cog.search_source("track") == {
@@ -897,8 +902,54 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
     ydl.__enter__.return_value.extract_info.assert_any_call(
         "ytsearch1:track", download=False
     )
+    resolver.assert_not_called()
     with pytest.raises(ValueError, match="No results found"):
         cog.search_source("missing")
+
+
+@pytest.mark.parametrize(
+    "hostname, address",
+    [
+        ("localhost", "127.0.0.1"),
+        ("private.test", "10.0.0.1"),
+        ("link-local.test", "169.254.1.1"),
+        ("reserved.test", "192.0.2.1"),
+        ("multicast.test", "224.0.0.1"),
+        ("ipv6.test", "::1"),
+        ("2130706433", "127.0.0.1"),
+    ],
+)
+def test_search_source_rejects_non_public_urls(monkeypatch, hostname, address):
+    monkeypatch.setattr(
+        "extensions.audio.music.getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, (address, 443))],
+    )
+    youtube_dl = MagicMock()
+    monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
+
+    with pytest.raises(ValueError, match="public addresses"):
+        MusicCog(_make_bot()).search_source(f"https://{hostname}/audio")
+
+    youtube_dl.assert_not_called()
+
+
+def test_search_source_rejects_mixed_public_and_private_dns(monkeypatch):
+    monkeypatch.setattr(
+        "extensions.audio.music.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (None, None, None, None, ("93.184.216.34", 443)),
+            (None, None, None, None, ("10.0.0.1", 443)),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="public addresses"):
+        MusicCog(_make_bot()).search_source("https://mixed.test/audio")
+
+
+@pytest.mark.parametrize("query", ["http://", "https://[invalid"])
+def test_search_source_rejects_malformed_urls(query):
+    with pytest.raises(ValueError, match="Invalid or unavailable URL"):
+        MusicCog(_make_bot()).search_source(query)
 
 
 @pytest.mark.asyncio
