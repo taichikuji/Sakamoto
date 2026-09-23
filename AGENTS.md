@@ -10,6 +10,7 @@ Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`,
 - Use Pipenv for dependency management and commands (`pipenv sync`, `pipenv run ...`).
 - Keep Discord code asynchronous; do not introduce blocking work.
 - Reuse shared resources, including the bot's `aiohttp.ClientSession`.
+- Treat CPU, memory, network traffic, and background processes as costs. Stop temporary workers such as Buildx builders after use, avoid recurring work without a clear benefit, and preserve caches that prevent more expensive requests.
 - Optional integrations must fail gracefully: preserve core slash-command and voice workflows.
 
 ## Structure
