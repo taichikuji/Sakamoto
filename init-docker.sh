@@ -75,8 +75,8 @@ else
     log "$ERROR" "Failed to remove containers"; exit 1
 fi
 
-# Pull latest version
-if git fetch --all; then
+# Pull latest version without discarding local commits or changes
+if git pull --ff-only; then
     log "$SUCCESS" "Updated to latest commit"
 else
     log "$ERROR" "Git update failed"; exit 1
