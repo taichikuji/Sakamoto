@@ -124,28 +124,31 @@ class VotekickView(View):
 
         if len(self.yes_votes) >= self.required_votes:
             self.stop()
-            if self.message:
-                self.disable_all_buttons()
-
-                embed = self.message.embeds[0]
-                embed.title = "Votekick Successful"
-                embed.description = (
-                    f":heavy_check_mark: {self.target.mention} has been kicked "
-                    "from the voice channel."
-                )
-                embed.color = 0x00FF00  # Green
-
-                await self.message.edit(embed=embed, view=self)
-
-            if self.target.voice and self.target.voice.channel:
-                original_channel = self.target.voice.channel
+            kicked = False
+            if self.target.voice and self.target.voice.channel == self.channel:
                 try:
                     await self.target.move_to(None, reason="Votekick successful.")
                 except Exception:
-                    logger.error("Failed to move %s during votekick.", self.target)
+                    logger.exception("Failed to move %s during votekick.", self.target)
+                else:
+                    kicked = True
 
-                if isinstance(cog := self.bot.get_cog("ModerationCog"), ModerationCog):
-                    await cog.ban_temporarily(self.target, original_channel)
+            if self.message:
+                self.disable_all_buttons()
+                embed = self.message.embeds[0]
+                embed.title = "Votekick Successful" if kicked else "Votekick Ended"
+                embed.description = (
+                    f":heavy_check_mark: {self.target.mention} has been kicked from the voice channel."
+                    if kicked
+                    else f":x: {self.target.mention} was not kicked from the voice channel."
+                )
+                embed.color = 0x00FF00 if kicked else 0xFF0000
+                await self.message.edit(embed=embed, view=self)
+
+            if kicked and isinstance(
+                cog := self.bot.get_cog("ModerationCog"), ModerationCog
+            ):
+                await cog.ban_temporarily(self.target, self.channel)
 
     @button(label="No", style=ButtonStyle.red)
     async def no_button(self, interaction: Interaction, _button: Button):

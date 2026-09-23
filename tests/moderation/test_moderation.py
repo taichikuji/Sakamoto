@@ -176,6 +176,32 @@ async def test_yes_button_successful_vote_kicks_target_and_records_ban(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_yes_vote_does_not_kick_target_from_another_channel():
+    bot = SimpleNamespace()
+    moderation_cog = ModerationCog(bot)
+    moderation_cog.ban_temporarily = AsyncMock()
+    bot.get_cog = lambda _name: moderation_cog
+    original_channel = object()
+    target = DummyMember(22, channel=original_channel)
+    target.move_to = AsyncMock()
+    view = VotekickView(bot, 1, target, original_channel)
+    embed = DummyEmbed()
+    view.message = SimpleNamespace(embeds=[embed], edit=AsyncMock())
+
+    async def move_target(_interaction):
+        target.voice.channel = object()
+
+    view.update_embed = move_target
+    await view.children[0].callback(
+        _make_interaction(user=DummyMember(99), guild=object())
+    )
+
+    target.move_to.assert_not_awaited()
+    moderation_cog.ban_temporarily.assert_not_awaited()
+    assert embed.title == "Votekick Ended"
+
+
+@pytest.mark.asyncio
 async def test_votekick_command_guardrails(monkeypatch):
     monkeypatch.setattr("extensions.moderation.votekick.Member", DummyMember)
     cog = ModerationCog(SimpleNamespace(color=0x123456))
