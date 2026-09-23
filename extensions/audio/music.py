@@ -222,11 +222,12 @@ class MusicCog(commands.Cog):
             ):
                 mark_app_command_failed(interaction)
 
-        except Exception as error:
+        except Exception:
+            logger.exception("Failed to retrieve audio in guild %s", guild_id)
             if not was_connected:
                 await self.engine.disconnect_and_cleanup(guild_id)
             await interaction.followup.send(
-                f":x: Failed to retrieve audio. Error: {error}", ephemeral=True
+                ":x: Failed to retrieve audio.", ephemeral=True
             )
             mark_app_command_failed(interaction)
 

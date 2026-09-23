@@ -787,7 +787,7 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_play_reports_voice_connection_exception(monkeypatch):
+async def test_play_hides_voice_connection_exception(monkeypatch):
     voice_channel = DummyVoiceChannel()
     interaction = _make_interaction(
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
@@ -804,12 +804,12 @@ async def test_play_reports_voice_connection_exception(monkeypatch):
 
     cog.engine.enqueue_or_play.assert_not_awaited()
     interaction.followup.send.assert_awaited_once_with(
-        ":x: Failed to retrieve audio. Error: connection failed", ephemeral=True
+        ":x: Failed to retrieve audio.", ephemeral=True
     )
 
 
 @pytest.mark.asyncio
-async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
+async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch, caplog):
     connected_client = DummyVoiceClient(connected=True)
     voice_channel = DummyVoiceChannel(connected_client=connected_client)
     interaction = _make_interaction(
@@ -821,6 +821,10 @@ async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch):
 
     await MusicCog.play.callback(cog, interaction, query="missing")
 
+    interaction.followup.send.assert_awaited_once_with(
+        ":x: Failed to retrieve audio.", ephemeral=True
+    )
+    assert "yt-dlp failed" in caplog.text
     voice_channel.connect.assert_awaited_once()
     connected_client.stop.assert_not_called()
     connected_client.disconnect.assert_awaited_once()
