@@ -51,28 +51,45 @@ export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 pipenv run python main.py
 ```
 
-Extensions live in `extensions/`, grouped by responsibility:
-
-- `core/` contains always-on administration such as loading, syncing, and shutdown.
-- `audio/`, `moderation/`, `community/`, `integrations/`, and `general/` contain user-facing domains.
-
 See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
 
-### Command analytics
+## Features
 
-Sakamoto stores UTC daily aggregate command counts so the Discord application owner can review usage with `/analytics`. The report defaults to 30 days and accepts a period from 1 to 90 days.
+Extensions live in `extensions/`, grouped by responsibility:
 
-The analytics table contains only the command's fully qualified name and its successful and failed invocation counts. It does not store user or server history, Discord IDs, command arguments or options, message content, search terms, URLs, IP data, or command error details. Direct-message interactions are ignored. Daily rows are permanently deleted after 90 days.
+**Audio**
 
-Every guild slash command completion and unhandled error is counted. Commands whose normal operation can end in a handled failure, such as an upstream service error or an immediate playback failure, additionally mark that outcome as failed instead of successful.
+- `audio.music` — Search and play songs or audio URLs; manage the queue, skip tracks, or stop playback.
+- `audio.radio` — Search Radio Garden stations or play a random station.
 
-### Spam honeypot
+**Community**
 
-Create a clearly labelled text channel where members can send messages but are told not to. An administrator can run `/honeypot set` with that channel, or run it without a channel to disable the honeypot. Sakamoto needs Ban Members permission and must be able to view the channel. The channel must allow everyone to send messages and attach files.
+- `community.lobby` — Create and clean up temporary voice lobbies from a configured generator channel.
+- `community.redirect` — Rewrite supported X, Bluesky, TikTok, and Instagram links to alternative frontends.
 
-Any ordinary message or reply from a non-admin, non-bot member in the honeypot triggers a softban: Sakamoto bans the member with a request to delete their previous hour of messages across the server, then immediately unbans them so they can rejoin. It also tries to delete the triggering message directly because Discord's ban cleanup may leave it behind. The bot's role must be above the member's role for the ban to succeed. If the unban fails, the member remains banned and Sakamoto logs that a manual unban is needed.
+**Core**
 
-Run `/honeypot log set` with a staff text channel to receive an event after each trigger, including ban or unban failures. Run it without a channel to stop posting logs. The log channel must differ from the honeypot channel, and Sakamoto needs permission to view and send messages there. The bot does not forward the triggering message or DM the member.
+- `core.analytics` — Give the application owner daily aggregate slash-command success and failure counts through `/analytics`.
+- `core.loader` — Let the application owner load, unload, or reload extensions at runtime.
+- `core.shutdown` — Let the application owner shut down the bot gracefully.
+- `core.sync` — Sync global and server application commands as the bot owner.
+
+**General**
+
+- `general.help` — Browse available commands or get details about one.
+- `general.info` — View bot information and uptime.
+- `general.ping` — Check bot latency.
+
+**Integrations**
+
+- `integrations.anilist` — Search anime, manga, characters, and users; browse rankings and weekly airing schedules.
+- `integrations.steam` — Link a Steam account and get join links for joinable Steam game lobbies.
+
+**Moderation**
+
+- `moderation.clear` — Bulk-delete up to 100 messages, optionally filtering by member.
+- `moderation.honeypot` — Softban non-admins who post in a configured bait channel, request deletion of their last hour of messages, remove the bait post, and optionally log the event.
+- `moderation.votekick` — Let members vote to remove someone from their current voice channel.
 
 ## Dependencies
 
