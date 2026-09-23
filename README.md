@@ -22,7 +22,13 @@ export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 ./init-docker.sh
 ```
 
-By default, Docker Compose builds Sakamoto locally.
+By default, Docker Compose builds Sakamoto locally. On an existing installation
+with root-owned data from an older release, migrate the volume ownership once
+before running `./init-docker.sh`:
+
+```bash
+docker compose run --rm --user root --entrypoint chown discord -R sakamoto:sakamoto /usr/src/app/data
+```
 
 To enable automatic updates, uncomment the published `ghcr.io/taichikuji/sakamoto:latest` image, the Watchtower label, and the `updater` service in `docker-compose.yml`. The updater uses the maintained `nickfedor/watchtower` fork, only watches labelled containers, and removes old images after successful updates.
 

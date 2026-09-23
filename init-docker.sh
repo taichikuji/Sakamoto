@@ -42,14 +42,6 @@ reset_git() {
     fi
 }
 
-cleanup_buildkit() {
-    if docker ps -a --filter "name=buildx_buildkit" --format "table {{.Names}}" | grep buildx_buildkit | xargs -r docker rm -f 2>/dev/null; then
-        log "$SUCCESS" "BuildKit containers removed"
-    else
-        log "$ERROR" "No BuildKit containers to remove"
-    fi
-}
-
 # Check for --help flag
 if [[ "$1" == "--help" ]]; then
     show_help
@@ -68,13 +60,6 @@ if [[ "$1" == "--reset" ]]; then
     exit 0
 fi
 
-# Clean old version
-if docker compose down; then
-    log "$SUCCESS" "Container removed"
-else
-    log "$ERROR" "Failed to remove containers"; exit 1
-fi
-
 # Pull latest version without discarding local commits or changes
 if git pull --ff-only; then
     log "$SUCCESS" "Updated to latest commit"
@@ -82,11 +67,12 @@ else
     log "$ERROR" "Git update failed"; exit 1
 fi
 
-# Build, migrate persistent data ownership, and start new version
-if docker compose build --force-rm && \
-    docker compose run --rm --user root --entrypoint chown discord -R sakamoto:sakamoto /usr/src/app/data && \
-    docker compose up -d; then
-    cleanup_buildkit
+# Build before replacing the running container, preserving its data volume
+if docker compose up -d --build; then
+    # Stop the selected builder without deleting its cache or other builders.
+    if ! docker buildx stop; then
+        log "$ERROR" "BuildKit builder could not be stopped"
+    fi
     log "$SUCCESS" "Build and start successful"
 else
     log "$ERROR" "Build/start failed"; exit 1
