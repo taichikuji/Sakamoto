@@ -6,7 +6,7 @@ Run this on the Proxmox host to create an unprivileged Debian 13 LXC and install
 bash -c "$(wget -qO- https://raw.githubusercontent.com/taichikuji/Sakamoto/main/proxmox/sakamoto.sh)"
 ```
 
-The installer uses [community-scripts](https://github.com/community-scripts/ProxmoxVE), defaults to 2 CPU cores, 1 GB RAM, and 4 GB disk, installs Sakamoto at `/opt/Sakamoto`, and enables (without starting) `Sakamoto.service`.
+The installer uses [community-scripts](https://github.com/community-scripts/ProxmoxVE), defaults to 2 CPU cores, 1 GB RAM, and 4 GB disk, installs Python 3.14 and Sakamoto at `/opt/Sakamoto`, and enables (without starting) `Sakamoto.service`. uv provisions Python; Pipenv installs the locked project packages.
 
 ## Finish setup
 
