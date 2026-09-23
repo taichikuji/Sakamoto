@@ -1,26 +1,21 @@
 # Agent Guide
 
-Before changing code, read `README.md`, `CONTEXT.md`, `.github/CONTRIBUTING.md`, and the relevant implementation and tests.
+Inspect the code and tests you will change. Read `CONTEXT.md` for behavior and maintainer decisions, `README.md` for setup or deployment, and `.github/CONTRIBUTING.md` for contribution workflow when relevant.
 
-## Rules
+## Work
 
-- Make the smallest complete change; avoid unrelated refactors, dependencies, and behavior changes.
-- Never expose or commit secrets.
-- If behavior is unclear, inspect the code, tests, and documentation instead of guessing.
-- Use Pipenv for dependency management and commands (`pipenv sync`, `pipenv run ...`).
-- Keep Discord code asynchronous; do not introduce blocking work.
-- Reuse shared resources, including the bot's `aiohttp.ClientSession`.
-- Treat CPU, memory, network traffic, and background processes as costs. Stop temporary workers such as Buildx builders after use, avoid recurring work without a clear benefit, and preserve caches that prevent more expensive requests.
-- Optional integrations must fail gracefully: preserve core slash-command and voice workflows.
+- Make the smallest complete change. Avoid unrelated refactors and behavior changes. Add dependencies only when they materially simplify the solution.
+- Never expose or commit secrets. Commit or push only when asked.
+- Use Pipenv for dependencies and commands (`pipenv sync`, `pipenv run ...`).
+- Keep Discord code asynchronous and nonblocking. Reuse the bot's `aiohttp.ClientSession`.
+- Keep optional integrations isolated so their failure does not break core slash commands or voice.
+- Avoid unnecessary CPU, memory, network, and background work. Stop temporary workers, including Buildx builders, after use; keep caches that reduce expensive requests.
 
-## Structure
+## Code map
 
-- Extensions: `extensions/core/` (always-on administration) and domain folders such as `extensions/audio/` and `extensions/moderation/`.
-- Files beginning with `_` are internal and are not extensions.
-- Music changes require reviewing `extensions/audio/music.py` and `extensions/audio/_audio_engine.py`.
-  - Keep provider/source resolution in `music.py`.
-  - Keep generic voice, queue, and playback state in `_audio_engine.py`.
+- `extensions/core/` holds always-on administration; other extensions live in domain folders. Files beginning with `_` are internal, not extensions.
+- For music changes, inspect both `extensions/audio/music.py` and `extensions/audio/_audio_engine.py`. Keep provider and source resolution in `music.py`; keep shared voice, queue, and playback state in `_audio_engine.py`.
 
 ## Verify
 
-Run tests for the changed subsystem, including audio tests for music or audio changes, then the full suite when practical.
+Run focused tests for changed behavior, including audio tests for music or audio changes. Run the full suite for changes that affect shared behavior.
