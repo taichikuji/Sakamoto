@@ -1,3 +1,10 @@
+"""Catch spam sent to a bait channel and remove the sender's recent messages.
+
+Each server can configure a honeypot and an optional staff log channel. A member
+who posts in the honeypot is banned with a request to delete their last hour of
+server messages, then immediately unbanned so they can rejoin.
+"""
+
 import logging
 from os import makedirs, path
 from typing import TYPE_CHECKING
@@ -31,8 +38,11 @@ class HoneypotCog(
     group_name="honeypot",
     group_description="Configure a channel that catches server-wide spam.",
 ):
+    """Persist channel settings and moderate messages sent to the honeypot."""
+
     def __init__(self, bot: Sakamoto):
         self.bot = bot
+        # SQLite persists settings; these maps avoid a database read per message.
         self.channels: dict[int, int] = {}
         self.log_channels: dict[int, int] = {}
 
@@ -101,6 +111,7 @@ class HoneypotCog(
                 mark_app_command_failed(interaction)
                 return
             everyone = channel.permissions_for(guild.default_role)
+            # Scam posts may consist only of an image, so attachments must work too.
             if not everyone.send_messages or not everyone.attach_files:
                 await interaction.response.send_message(
                     ":x: Everyone needs Send Messages and Attach Files in the honeypot channel.",
@@ -188,6 +199,7 @@ class HoneypotCog(
         try:
             await channel.send(
                 f"🍯 Honeypot: {member.mention} (`{member.id}`) — {outcome}",
+                # Show the account to staff without notifying it or any roles.
                 allowed_mentions=AllowedMentions.none(),
             )
         except HTTPException:
@@ -197,6 +209,7 @@ class HoneypotCog(
     async def on_message(self, message: Message) -> None:
         guild = message.guild
         member = message.author
+        # System events and trusted accounts must never trigger moderation.
         if (
             guild is None
             or self.channels.get(guild.id) != message.channel.id
@@ -210,6 +223,8 @@ class HoneypotCog(
 
         outcome = "Softban complete. Discord was asked to remove the member's last hour of messages."
         try:
+            # Discord removes recent guild messages during the ban; the immediate
+            # unban makes this a softban rather than a permanent removal.
             await guild.ban(
                 member,
                 delete_message_seconds=3600,
@@ -233,6 +248,8 @@ class HoneypotCog(
                     guild.id,
                 )
                 outcome = "Ban succeeded, but unban failed. A moderator must unban this member."
+        # Delete the bait post separately: ban cleanup may not remove it, and
+        # this still works when the ban fails.
         try:
             await message.delete()
         except NotFound:
