@@ -66,6 +66,14 @@ The analytics table contains only the command's fully qualified name and its suc
 
 Every guild slash command completion and unhandled error is counted. Commands whose normal operation can end in a handled failure, such as an upstream service error or an immediate playback failure, additionally mark that outcome as failed instead of successful.
 
+### Spam honeypot
+
+Create a clearly labelled text channel where members can send messages but are told not to. An administrator can run `/honeypot set` with that channel, or run it without a channel to disable the honeypot. Sakamoto needs Ban Members permission and must be able to view the channel. The channel must allow everyone to send messages and attach files.
+
+Any ordinary message or reply from a non-admin, non-bot member in the honeypot triggers a softban: Sakamoto bans the member with a request to delete their previous hour of messages across the server, then immediately unbans them so they can rejoin. It also tries to delete the triggering message directly because Discord's ban cleanup may leave it behind. The bot's role must be above the member's role for the ban to succeed. If the unban fails, the member remains banned and Sakamoto logs that a manual unban is needed.
+
+Run `/honeypot log set` with a staff text channel to receive an event after each trigger, including ban or unban failures. Run it without a channel to stop posting logs. The log channel must differ from the honeypot channel, and Sakamoto needs permission to view and send messages there. The bot does not forward the triggering message or DM the member.
+
 ## Dependencies
 
 Can be seen @ [Pipfile](https://github.com/taichikuji/Sakamoto/blob/main/Pipfile)
