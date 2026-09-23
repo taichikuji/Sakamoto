@@ -106,7 +106,6 @@ class AnalyticsCog(commands.Cog):
                 UPSERT_SQL,
                 (today.isoformat(), command_name, int(succeeded), int(not succeeded)),
             )
-            await self._delete_expired(db)
             await db.commit()
 
     async def _record_safely(self, command_name: str, *, succeeded: bool) -> None:
