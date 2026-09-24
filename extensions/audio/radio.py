@@ -152,10 +152,9 @@ class RadioCog(
             mark_app_command_failed(interaction)
             return
 
-        self.engine.set_command_channel(guild_id, channel)
         title = escape_markdown(station.title)
 
-        if not await self.engine.enqueue_or_play(
+        if await self.engine.enqueue_or_play(
             guild_id,
             QueueItem(
                 source_url=self.radio_stream_url(station.channel_id),
@@ -171,6 +170,8 @@ class RadioCog(
                 f":ballot_box_with_check: Added to queue: :radio: **{title}** [LIVE]"
             ),
         ):
+            self.engine.set_command_channel(guild_id, channel)
+        else:
             mark_app_command_failed(interaction)
 
     async def resolve_radio_station(self, query: str | None) -> RadioStation:

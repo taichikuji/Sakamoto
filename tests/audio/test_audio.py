@@ -741,6 +741,36 @@ async def test_play_connects_before_enqueue(monkeypatch):
     voice_channel.connect.assert_awaited_once()
     assert cog.engine.is_connected(1)
     cog.engine.enqueue_or_play.assert_awaited_once()
+    assert cog.engine.sessions[1].command_channel is interaction.channel
+
+
+@pytest.mark.asyncio
+async def test_failed_play_does_not_move_announcement_channel(monkeypatch):
+    voice_channel = DummyVoiceChannel()
+    interaction = _make_interaction(
+        user=DummyMember(42, voice_channel=voice_channel), guild_id=1
+    )
+    cog = MusicCog(_make_bot())
+    previous_channel = SimpleNamespace(send=AsyncMock())
+    session = _add_session(
+        cog.engine,
+        DummyVoiceClient(connected=True),
+        command_channel=previous_channel,
+    )
+    cog.resolve_source = AsyncMock(
+        return_value={
+            "webpage_url": "https://www.youtube.com/watch?v=abc",
+            "title": "Track",
+            "duration_string": "3:00",
+        }
+    )
+    cog.engine.enqueue_or_play = AsyncMock(return_value=False)
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
+
+    await MusicCog.play.callback(cog, interaction, query="track")
+
+    assert session.command_channel is previous_channel
+    assert interaction.command_failed is True
 
 
 @pytest.mark.asyncio

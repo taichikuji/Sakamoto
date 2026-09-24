@@ -200,26 +200,31 @@ class MusicCog(commands.Cog):
                 raise voice_client
             if isinstance(info, Exception):
                 raise info
-            self.engine.set_command_channel(guild_id, cast(Messageable, channel))
 
             if self._is_url(query) and info.get("_type") in ["playlist", "multi_video"]:
                 entries = list(info.get("entries") or [])
                 if not entries:
                     raise ValueError("The playlist is empty or private.")
 
-                if not await self.engine.enqueue_playlist(
+                if await self.engine.enqueue_playlist(
                     guild_id=guild_id,
                     items=self.playlist_items(entries),
                     followup=interaction.followup.send,
                 ):
+                    self.engine.set_command_channel(
+                        guild_id, cast(Messageable, channel)
+                    )
+                else:
                     mark_app_command_failed(interaction)
                 return
 
-            if not await self.engine.enqueue_or_play(
+            if await self.engine.enqueue_or_play(
                 guild_id,
                 self.queue_item(self._first_track(info), requested_url=query),
                 followup=interaction.followup.send,
             ):
+                self.engine.set_command_channel(guild_id, cast(Messageable, channel))
+            else:
                 mark_app_command_failed(interaction)
 
         except Exception:
