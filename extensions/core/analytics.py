@@ -83,17 +83,23 @@ class AnalyticsCog(commands.Cog):
 
     def __init__(self, bot: Sakamoto):
         self.bot = bot
+        self.db: Connection
 
     async def cog_load(self) -> None:
         makedirs(path.dirname(self.bot.db_path), exist_ok=True)
-        async with connect(self.bot.db_path) as db:
+        db = await connect(self.bot.db_path, isolation_level=None)
+        try:
             await db.execute(CREATE_TABLE_SQL)
             await self._delete_expired(db)
-            await db.commit()
+        except BaseException:
+            await db.close()
+            raise
+        self.db = db
         self.delete_expired_daily.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         self.delete_expired_daily.cancel()
+        await self.db.close()
 
     async def _delete_expired(self, db: Connection) -> None:
         cutoff = utc_today() - timedelta(days=RETENTION_DAYS - 1)
@@ -101,12 +107,10 @@ class AnalyticsCog(commands.Cog):
 
     async def _record(self, command_name: str, *, succeeded: bool) -> None:
         today = utc_today()
-        async with connect(self.bot.db_path) as db:
-            await db.execute(
-                UPSERT_SQL,
-                (today.isoformat(), command_name, int(succeeded), int(not succeeded)),
-            )
-            await db.commit()
+        await self.db.execute(
+            UPSERT_SQL,
+            (today.isoformat(), command_name, int(succeeded), int(not succeeded)),
+        )
 
     async def _record_safely(self, command_name: str, *, succeeded: bool) -> None:
         try:
@@ -156,9 +160,7 @@ class AnalyticsCog(commands.Cog):
     @tasks.loop(time=time(hour=0, tzinfo=UTC))
     async def delete_expired_daily(self) -> None:
         try:
-            async with connect(self.bot.db_path) as db:
-                await self._delete_expired(db)
-                await db.commit()
+            await self._delete_expired(self.db)
         except Exception:
             logger.warning("Could not delete expired command analytics.", exc_info=True)
 
@@ -255,6 +257,10 @@ class AnalyticsCog(commands.Cog):
             )
         else:
             logger.error("Unexpected error in analytics command: %s", error)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    ":x: Could not load command analytics.", ephemeral=True
+                )
 
 
 async def setup(bot: Sakamoto) -> None:

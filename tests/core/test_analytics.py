@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import sys
 from pathlib import Path
@@ -118,6 +119,33 @@ async def test_tracking_failure_is_logged_and_isolated(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_database_writes_reuse_autocommit_connection(monkeypatch, tmp_path):
+    db = SimpleNamespace(execute=AsyncMock(), close=AsyncMock())
+    connect = MagicMock(
+        side_effect=lambda *_args, **_kwargs: asyncio.sleep(0, result=db)
+    )
+    monkeypatch.setattr("extensions.core.analytics.connect", connect)
+    cog = AnalyticsCog(_bot(tmp_path))
+    monkeypatch.setattr(cog.delete_expired_daily, "start", MagicMock())
+
+    await cog.cog_load()
+    await cog._record("ping", succeeded=True)
+    await cog._record("ping", succeeded=False)
+    await cog.delete_expired_daily.coro(cog)
+    await cog.cog_unload()
+
+    connect.assert_called_once_with(cog.bot.db_path, isolation_level=None)
+    assert [call.args[0] for call in db.execute.await_args_list] == [
+        CREATE_TABLE_SQL,
+        DELETE_EXPIRED_SQL,
+        UPSERT_SQL,
+        UPSERT_SQL,
+        DELETE_EXPIRED_SQL,
+    ]
+    db.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_analytics_access_check_uses_application_owner():
     interaction = SimpleNamespace(
         client=SimpleNamespace(is_owner=AsyncMock(return_value=False)), user=object()
@@ -168,3 +196,18 @@ def test_analytics_command_is_guild_only_and_bounded_to_retention():
     assert command.guild_only is True
     assert command.parameters[0].min_value == 1
     assert command.parameters[0].max_value == 90
+
+
+@pytest.mark.asyncio
+async def test_analytics_error_replies_when_report_fails(tmp_path):
+    cog = AnalyticsCog(_bot(tmp_path))
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+
+    await cog.on_analytics_error(
+        SimpleNamespace(response=response),
+        app_commands.AppCommandError("database error"),
+    )
+
+    response.send_message.assert_awaited_once_with(
+        ":x: Could not load command analytics.", ephemeral=True
+    )
