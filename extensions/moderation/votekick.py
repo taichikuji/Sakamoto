@@ -167,7 +167,7 @@ class ModerationCog(commands.Cog):
 
     async def cog_load(self):
         makedirs(path.dirname(self.bot.db_path), exist_ok=True)
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS votekick_bans (
                     channel_id INTEGER NOT NULL,
@@ -177,7 +177,6 @@ class ModerationCog(commands.Cog):
                     PRIMARY KEY (channel_id, member_id)
                 )
             """)
-            await db.commit()
             async with db.execute("SELECT * FROM votekick_bans") as cursor:
                 pending_bans = await cursor.fetchall()
 
@@ -193,12 +192,11 @@ class ModerationCog(commands.Cog):
         expires_at = time() + 60
         overwrite = channel.overwrites_for(member)
         previous_connect = overwrite.connect
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO votekick_bans VALUES (?, ?, ?, ?)",
                 (channel.id, member.id, expires_at, previous_connect),
             )
-            await db.commit()
         overwrite.connect = False
         await channel.set_permissions(member, overwrite=overwrite)
         self._schedule_unban(channel.id, member.id, expires_at, previous_connect)
@@ -234,12 +232,11 @@ class ModerationCog(commands.Cog):
             except NotFound:
                 pass
 
-            async with connect(self.bot.db_path) as db:
+            async with connect(self.bot.db_path, isolation_level=None) as db:
                 await db.execute(
                     "DELETE FROM votekick_bans WHERE channel_id = ? AND member_id = ?",
                     (channel_id, member_id),
                 )
-                await db.commit()
         except Exception as error:
             logger.warning("Could not expire ban in %s: %s", channel_id, error)
 

@@ -142,7 +142,7 @@ class LobbyCog(
 
     async def _init_db(self):
         makedirs(path.dirname(self.bot.db_path), exist_ok=True)
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS lobby_generator (
                     guild_id INTEGER PRIMARY KEY,
@@ -154,7 +154,6 @@ class LobbyCog(
                     channel_id INTEGER PRIMARY KEY
                 )
             """)
-            await db.commit()
 
     async def _load_generators(self):
         async with (
@@ -197,11 +196,10 @@ class LobbyCog(
                 await self._delete_lobby(channel)
 
     async def _add_lobby_tracking(self, channel_id: int) -> None:
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute(
                 "INSERT INTO lobby_active (channel_id) VALUES (?)", (channel_id,)
             )
-            await db.commit()
         self.active_channels.add(channel_id)
 
     async def _remove_lobby_tracking(self, channel_ids: set[int]) -> None:
@@ -218,20 +216,18 @@ class LobbyCog(
                 view.stop()
 
     async def _save_generator(self, guild_id: int, channel_id: int):
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO lobby_generator (guild_id, channel_id) VALUES (?, ?)",
                 (guild_id, channel_id),
             )
-            await db.commit()
         self.generators[guild_id] = channel_id
 
     async def _remove_generator(self, guild_id: int):
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute(
                 "DELETE FROM lobby_generator WHERE guild_id = ?", (guild_id,)
             )
-            await db.commit()
         self.generators.pop(guild_id, None)
 
     @app_commands.command(

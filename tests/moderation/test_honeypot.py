@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from discord import MessageType
@@ -99,11 +99,9 @@ async def test_log_channel_can_be_set_and_cleared(monkeypatch):
         async def execute(self, sql, params):
             self.statements.append((sql, params))
 
-        async def commit(self):
-            return None
-
     db = FakeDB()
-    monkeypatch.setattr("extensions.moderation.honeypot.connect", lambda _: db)
+    mocked_connect = Mock(return_value=db)
+    monkeypatch.setattr("extensions.moderation.honeypot.connect", mocked_connect)
     cog = HoneypotCog(SimpleNamespace(db_path="unused"))
     me = object()
     interaction = SimpleNamespace(
@@ -125,6 +123,10 @@ async def test_log_channel_can_be_set_and_cleared(monkeypatch):
     await HoneypotCog.set_log_channel.callback(cog, interaction, None)
     assert 7 not in cog.log_channels
     assert "DELETE FROM" in db.statements[-1][0]
+    assert mocked_connect.call_args_list == [
+        call("unused", isolation_level=None),
+        call("unused", isolation_level=None),
+    ]
 
 
 @pytest.mark.asyncio

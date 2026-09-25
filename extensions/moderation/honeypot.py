@@ -48,7 +48,7 @@ class HoneypotCog(
 
     async def cog_load(self) -> None:
         makedirs(path.dirname(self.bot.db_path), exist_ok=True)
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS honeypot_channels (
                     guild_id INTEGER PRIMARY KEY,
@@ -73,7 +73,6 @@ class HoneypotCog(
                 self.log_channels = {
                     guild_id: channel_id async for guild_id, channel_id in cursor
                 }
-            await db.commit()
 
     log = app_commands.Group(name="log", description="Configure honeypot logs.")
 
@@ -120,7 +119,7 @@ class HoneypotCog(
                 mark_app_command_failed(interaction)
                 return
 
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             if channel is None:
                 await db.execute(
                     "DELETE FROM honeypot_channels WHERE guild_id = ?", (guild.id,)
@@ -135,7 +134,6 @@ class HoneypotCog(
                     f":white_check_mark: {channel.mention} is the honeypot. "
                     "Non-admin messages there trigger a softban with a request to delete the author's last hour of server messages."
                 )
-            await db.commit()
         if channel is None:
             self.channels.pop(guild.id, None)
         else:
@@ -171,7 +169,7 @@ class HoneypotCog(
                 mark_app_command_failed(interaction)
                 return
 
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             if channel is None:
                 await db.execute(
                     "DELETE FROM honeypot_log_channels WHERE guild_id = ?", (guild.id,)
@@ -183,7 +181,6 @@ class HoneypotCog(
                     (guild.id, channel.id),
                 )
                 response = f":white_check_mark: Honeypot events will be logged in {channel.mention}."
-            await db.commit()
         if channel is None:
             self.log_channels.pop(guild.id, None)
         else:

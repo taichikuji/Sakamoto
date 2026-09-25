@@ -39,22 +39,20 @@ class SteamCog(
 
     async def _init_db(self):
         makedirs(path.dirname(self.bot.db_path), exist_ok=True)
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS steam_links (
                     discord_id INTEGER PRIMARY KEY,
                     steam_id TEXT NOT NULL
                 )
             """)
-            await db.commit()
 
     async def _save_steam_link(self, discord_id: int, steam_id: str):
-        async with connect(self.bot.db_path) as db:
+        async with connect(self.bot.db_path, isolation_level=None) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO steam_links (discord_id, steam_id) VALUES (?, ?)",
                 (discord_id, steam_id),
             )
-            await db.commit()
 
     async def _get_steam_link(self, discord_id: int) -> str | None:
         async with (
