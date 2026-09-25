@@ -19,11 +19,6 @@ from discord.ui import Button, View, button
 
 from extensions.core.analytics import mark_app_command_failed
 
-# Tenrai owns fallback transport and errors; this module decides when to use it.
-from ._tenrai_fallback import TenraiError
-from ._tenrai_fallback import search_catalogue as search_tenrai_catalogue
-from ._tenrai_fallback import top_media as top_tenrai_media
-
 if TYPE_CHECKING:
     from main import Sakamoto
 
@@ -34,7 +29,7 @@ MediaType = Literal["ANIME", "MANGA"]
 SearchType = Literal[MediaType, "CHARACTER", "USER"]
 
 # ANILIST REQUEST POLICY
-# AniList is a shared, rate-limited service currently operating with reduced capacity.
+# AniList is a shared, rate-limited service.
 # Every new command must reuse cached reads, coalesce equivalent requests, request only
 # fields it displays, and avoid retries during outages or rate limits. Pagination must
 # cache fetched pages instead of requesting them again when users navigate backwards.
@@ -46,7 +41,6 @@ SearchType = Literal[MediaType, "CHARACTER", "USER"]
 # feed autocomplete, the initial embed, and every pagination button without another
 # AniList request. Discord embeds are built last so the cache stays presentation-free.
 CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
-FALLBACK_CACHE_TTL_SECONDS = 60 * 60
 TOP_CACHE_TTL_SECONDS = 6 * 60 * 60
 CACHE_LIMIT = 256
 DESCRIPTION_LIMIT = 350
@@ -153,19 +147,8 @@ query (
 class AniListError(Exception):
     """AniList could not return a usable response."""
 
-    def __init__(
-        self,
-        message: str,
-        status: int | None = None,
-        *,
-        unavailable: bool = False,
-    ) -> None:
+    def __init__(self, message: str, status: int | None = None) -> None:
         self.status = status
-        self.unavailable = (
-            unavailable
-            or status in {403, 429}
-            or (status is not None and 500 <= status < 600)
-        )
         super().__init__(message)
 
 
@@ -195,11 +178,11 @@ def _cut_at_word(description: str, limit: int) -> str:
     return shortened[:word_end].rstrip() if word_end > 0 else shortened
 
 
-def _clean_description(value: Any, fallback: str = "No synopsis available.") -> str:
+def _clean_description(value: Any, default: str = "No synopsis available.") -> str:
     parser = _DescriptionParser()
-    parser.feed(str(value or fallback))
+    parser.feed(str(value or default))
     parser.close()
-    description = "".join(parser.parts).strip() or fallback
+    description = "".join(parser.parts).strip() or default
     while "\n\n\n" in description:
         description = description.replace("\n\n\n", "\n\n")
     description = description.replace("~!", "||").replace("!~", "||")
@@ -233,7 +216,7 @@ async def _request(
             except (TypeError, ValueError) as error:
                 raise AniListError("AniList returned invalid JSON.") from error
     except (ClientError, TimeoutError) as error:
-        raise AniListError("Could not reach AniList.", unavailable=True) from error
+        raise AniListError("Could not reach AniList.") from error
 
     if not isinstance(payload, dict) or payload.get("errors"):
         raise AniListError("AniList rejected the search.")
@@ -268,26 +251,7 @@ async def _search_results(
             "CHARACTER": (CHARACTER_SEARCH, "characters"),
             "USER": (USER_SEARCH, "users"),
         }[search_type]
-    try:
-        payload = await _request(session, document, variables)
-    except AniListError as error:
-        if not error.unavailable or search_type == "USER":
-            raise
-        logger.warning(
-            "AniList %s search unavailable with status %s; using Tenrai",
-            search_type.lower(),
-            error.status or "transport",
-        )
-        try:
-            payload = await search_tenrai_catalogue(session, query, search_type, limit)
-        except TenraiError as fallback_error:
-            logger.warning(
-                "Tenrai %s fallback failed with status %s",
-                search_type.lower(),
-                fallback_error.status,
-            )
-            raise error from fallback_error
-    return _page_results(payload, result_field)
+    return _page_results(await _request(session, document, variables), result_field)
 
 
 async def _top_results(
@@ -340,12 +304,10 @@ def _result_names(result: dict[str, Any], search_type: SearchType) -> list[str]:
     return [str(names[field]).strip() for field in fields if names.get(field)]
 
 
-def _set_provider_author(embed: Embed, result: dict[str, Any], *, cached: bool) -> None:
-    provider = "Tenrai" if result.get("_provider") == "Tenrai" else "AniList"
-    author = f"{provider} • Cache Hit" if cached else provider
+def _set_anilist_author(embed: Embed, *, cached: bool) -> None:
     embed.set_author(
-        name=author,
-        url="https://tenrai.org/" if provider == "Tenrai" else "https://anilist.co/",
+        name="AniList • Cache Hit" if cached else "AniList",
+        url="https://anilist.co/",
     )
 
 
@@ -353,11 +315,14 @@ async def _send_anilist_error(
     interaction: Interaction, operation: str, error: AniListError
 ) -> None:
     logger.warning("AniList %s failed with status %s", operation, error.status)
-    message = (
-        ":x: AniList has temporarily disabled its API. Please try again later."
-        if error.status == 403
-        else ":x: AniList is unavailable. Please try again later."
-    )
+    if error.status == 429:
+        message = ":x: AniList API is rate limiting requests. Please try again later."
+    elif error.status is not None:
+        message = (
+            f":x: AniList API returned HTTP {error.status}. Please try again later."
+        )
+    else:
+        message = ":x: Could not get a response from AniList. Please try again later."
     await interaction.followup.send(message, ephemeral=True)
     mark_app_command_failed(interaction)
 
@@ -419,7 +384,7 @@ def media_embed(
     banner_url = media.get("bannerImage")
     if isinstance(banner_url, str):
         embed.set_image(url=banner_url)
-    _set_provider_author(embed, media, cached=cached)
+    _set_anilist_author(embed, cached=cached)
     return embed
 
 
@@ -460,7 +425,7 @@ def character_embed(
     image_url = image.get("large") if isinstance(image, dict) else None
     if isinstance(image_url, str):
         embed.set_thumbnail(url=image_url)
-    _set_provider_author(embed, character, cached=cached)
+    _set_anilist_author(embed, cached=cached)
     return embed
 
 
@@ -513,7 +478,7 @@ def user_embed(user: dict[str, Any], color: int, *, cached: bool = False) -> Emb
     banner_url = user.get("bannerImage")
     if isinstance(banner_url, str):
         embed.set_image(url=banner_url)
-    _set_provider_author(embed, user, cached=cached)
+    _set_anilist_author(embed, cached=cached)
     return embed
 
 
@@ -662,12 +627,7 @@ class AniListCog(
             if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
                 return cached[1], True
             result = await _search_results(self.bot.session, query, search_type)
-            expires_at = (
-                monotonic() + FALLBACK_CACHE_TTL_SECONDS
-                if any(item.get("_provider") == "Tenrai" for item in result)
-                else None
-            )
-            self._store_cache(key, result, expires_at=expires_at)
+            self._store_cache(key, result)
             return result, False
 
     async def _cached_top(
@@ -690,37 +650,14 @@ class AniListCog(
         async with self.search_lock:
             if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
                 return cached[1], True
-            fallback_args = {
-                "year": year,
-                "genre": genre,
-                "season": season,
-                "media_format": media_format,
-            }
-            try:
-                results = await _top_results(
-                    self.bot.session, media_type, **fallback_args
-                )
-            except AniListError as error:
-                if not error.unavailable:
-                    raise
-                logger.warning(
-                    "AniList top ranking unavailable with status %s; using Tenrai",
-                    error.status or "transport",
-                )
-                try:
-                    payload = await top_tenrai_media(
-                        self.bot.session,
-                        media_type,
-                        TOP_RESULT_LIMIT,
-                        **fallback_args,
-                    )
-                    results = _page_results(payload, "media")
-                except TenraiError as fallback_error:
-                    logger.warning(
-                        "Tenrai top ranking fallback failed with status %s",
-                        fallback_error.status,
-                    )
-                    raise error from fallback_error
+            results = await _top_results(
+                self.bot.session,
+                media_type,
+                year=year,
+                genre=genre,
+                season=season,
+                media_format=media_format,
+            )
             self._store_cache(
                 key, results, expires_at=monotonic() + TOP_CACHE_TTL_SECONDS
             )

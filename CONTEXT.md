@@ -31,9 +31,9 @@ Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot 
 - `/shutdown` is also intentional: it stops the process so Docker can restart a malfunctioning bot.
 - Persist unfinished actions only when process death would otherwise lose required cleanup, as with Temporary Rejoin Bans. Cover failure classes broadly; add scenario-specific machinery only after a real need appears.
 - An optional integration that requires an API token must fail its own extension setup when the token is absent, while allowing the rest of the bot to load normally.
-- Caches that reduce third-party requests are operational safeguards, not disposable optimizations. Keep freshness policies separate where the data differs: ordinary AniList searches may be cached for a week, while fallback results and rankings refresh sooner.
+- Caches that reduce third-party requests are operational safeguards, not disposable optimizations. AniList searches may be cached for a week, while rankings refresh sooner.
 - Keep `/anilist weekly` link-only; purpose-built schedule sites are more usable than an API-backed Discord listing.
-- AniList catalogue commands fall back to Tenrai for HTTP 403, 429, 5xx, connection failures, and timeouts. Keep user lookup AniList-only, and do not hide ordinary 4xx request errors behind fallback.
+- AniList catalogue and user lookup use AniList only; surface API failures without querying another provider.
 - Preserve request coalescing and autocomplete cache seeding when they prevent duplicate API calls. Music source caching should remain bounded and respect each signed stream URL's expiry to limit YouTube extraction traffic.
 - Prefer the smallest working implementation, existing code, standard-library or platform features, and no new dependency unless it provides a demonstrated benefit. Do not remove an intentional feature merely because it adds code.
 - Use a regular Discord bot until actual guild scale warrants sharding; do not enable sharding only as a precaution.
