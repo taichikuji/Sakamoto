@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,9 +14,7 @@ from extensions.community.lobby import LobbyCog, RenameModal, VoiceControlView
 
 
 async def _init_test_db(cog):
-    if sys.version_info >= (3, 14):
-        pytest.skip("aiosqlite.connect() blocks under Python 3.14 in this environment")
-    await cog._init_db()
+    await asyncio.wait_for(cog._init_db(), timeout=3)
 
 
 def test_set_generator_keeps_optional_channel_description():
@@ -455,7 +454,7 @@ async def test_create_lobby_cleans_up_when_member_move_fails(tmp_path):
     await _init_test_db(cog)
     new_channel = SimpleNamespace(id=303, delete=AsyncMock(), send=AsyncMock())
     guild = SimpleNamespace(create_voice_channel=AsyncMock(return_value=new_channel))
-    member = SimpleNamespace(
+    member = Mock(
         guild=guild,
         display_name="Owner",
         mention="@Owner",

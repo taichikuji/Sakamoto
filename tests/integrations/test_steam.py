@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,9 +13,7 @@ from extensions.integrations.steam import SteamCog
 
 
 async def _init_test_db(cog):
-    if sys.version_info >= (3, 14):
-        pytest.skip("aiosqlite.connect() blocks under Python 3.14 in this environment")
-    await cog._init_db()
+    await asyncio.wait_for(cog._init_db(), timeout=3)
 
 
 class DummyResponse:
