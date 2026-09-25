@@ -47,6 +47,11 @@ class InfoCog(commands.Cog):
                     "value": "[GitHub](https://github.com/taichikuji/Sakamoto)",
                     "inline": True,
                 },
+                {
+                    "name": "Servers",
+                    "value": str(len(self.bot.guilds)),
+                    "inline": True,
+                },
             ],
         }
         return Embed.from_dict(embed_data)
