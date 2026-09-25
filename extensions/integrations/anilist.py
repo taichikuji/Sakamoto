@@ -29,7 +29,7 @@ MediaType = Literal["ANIME", "MANGA"]
 SearchType = Literal[MediaType, "CHARACTER", "USER"]
 
 # ANILIST REQUEST POLICY
-# AniList is a shared, rate-limited service.
+# AniList is a shared, rate-limited service currently operating with reduced capacity.
 # Every new command must reuse cached reads, coalesce equivalent requests, request only
 # fields it displays, and avoid retries during outages or rate limits. Pagination must
 # cache fetched pages instead of requesting them again when users navigate backwards.
