@@ -9,7 +9,7 @@
 
 # Usage:
 # - Run the script without arguments to update and restart the Docker environment.
-# - Use the "--prune" flag to perform a full cleanup before updating and restarting.
+# - Use the "--prune" flag to clean up containers and images while preserving data.
 # - Use the "--reset" flag to reset the repository without affecting the Docker environment.
 # - Use the "--help" flag to display this help message.
 
@@ -26,7 +26,7 @@ show_help() {
 }
 
 prune() {
-    if docker compose down --rmi local --volumes --remove-orphans; then
+    if docker compose down --rmi local --remove-orphans; then
         log "$SUCCESS" "Docker cleanup successful"
     else
         log "$ERROR" "Docker cleanup failed"; exit 1
