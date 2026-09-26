@@ -98,14 +98,14 @@ class HoneypotCog(
             me = guild.me
             if me is None or not me.guild_permissions.ban_members:
                 await interaction.response.send_message(
-                    ":x: Sakamoto needs Ban Members permission to run the honeypot.",
+                    ":x: Sakamoto needs the Ban Members permission.",
                     ephemeral=True,
                 )
                 mark_app_command_failed(interaction)
                 return
             if not channel.permissions_for(me).view_channel:
                 await interaction.response.send_message(
-                    ":x: Sakamoto needs to see the honeypot channel.", ephemeral=True
+                    ":x: Sakamoto needs View Channel permission.", ephemeral=True
                 )
                 mark_app_command_failed(interaction)
                 return
@@ -113,7 +113,7 @@ class HoneypotCog(
             # Scam posts may consist only of an image, so attachments must work too.
             if not everyone.send_messages or not everyone.attach_files:
                 await interaction.response.send_message(
-                    ":x: Everyone needs Send Messages and Attach Files in the honeypot channel.",
+                    ":x: Everyone needs Send Messages and Attach Files permissions.",
                     ephemeral=True,
                 )
                 mark_app_command_failed(interaction)
@@ -132,7 +132,7 @@ class HoneypotCog(
                 )
                 response = (
                     f":white_check_mark: {channel.mention} is the honeypot. "
-                    "Non-admin messages there trigger a softban with a request to delete the author's last hour of server messages."
+                    "Non-admin messages trigger a softban and recent-message cleanup."
                 )
         if channel is None:
             self.channels.pop(guild.id, None)
@@ -180,7 +180,7 @@ class HoneypotCog(
                     "INSERT OR REPLACE INTO honeypot_log_channels (guild_id, channel_id) VALUES (?, ?)",
                     (guild.id, channel.id),
                 )
-                response = f":white_check_mark: Honeypot events will be logged in {channel.mention}."
+                response = f":white_check_mark: Honeypot logs set to {channel.mention}."
         if channel is None:
             self.log_channels.pop(guild.id, None)
         else:
@@ -229,7 +229,7 @@ class HoneypotCog(
             )
         except HTTPException:
             logger.exception("Could not ban member %s in guild %s", member.id, guild.id)
-            outcome = "Ban failed; recent messages may still be visible."
+            outcome = "Ban failed; recent messages may remain."
         else:
             try:
                 await guild.unban(
@@ -244,7 +244,7 @@ class HoneypotCog(
                     member.id,
                     guild.id,
                 )
-                outcome = "Ban succeeded, but unban failed. A moderator must unban this member."
+                outcome = "Softban incomplete; manual unban required."
         # Delete the bait post separately: ban cleanup may not remove it, and
         # this still works when the ban fails.
         try:
@@ -253,7 +253,7 @@ class HoneypotCog(
             pass  # The ban already removed it.
         except HTTPException:
             logger.exception("Could not delete honeypot message %s", message.id)
-            outcome += " The triggering message could not be deleted."
+            outcome += " Triggering message could not be deleted."
         await self._send_log(guild, member, outcome)
 
 
