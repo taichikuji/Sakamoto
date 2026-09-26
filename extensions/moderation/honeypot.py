@@ -218,7 +218,7 @@ class HoneypotCog(
         ):
             return
 
-        outcome = "Softban complete. Discord was asked to remove the member's last hour of messages."
+        outcome = "Softbanned; recent messages removed."
         try:
             # Discord removes recent guild messages during the ban; the immediate
             # unban makes this a softban rather than a permanent removal.
