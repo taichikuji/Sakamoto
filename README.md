@@ -88,7 +88,7 @@ Extensions live in `extensions/`, grouped by responsibility:
 **Moderation**
 
 - `moderation.clear` — Bulk-delete up to 100 messages, optionally filtering by member.
-- `moderation.honeypot` — Softban non-admins who post in a configured bait channel, request deletion of their last hour of messages, remove the bait post, and optionally log the event.
+- `moderation.honeypot` — Softban members, including admins and the bot application owner, who post in a configured bait channel (except the server owner and bots), request deletion of their last hour of messages, remove the bait post, and optionally log the event.
 - `moderation.votekick` — Let members vote to remove someone from their current voice channel.
 
 ## Dependencies

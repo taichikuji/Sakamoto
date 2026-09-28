@@ -96,7 +96,7 @@ class HoneypotCog(
                 mark_app_command_failed(interaction)
                 return
             me = guild.me
-            if me is None or not me.guild_permissions.ban_members:
+            if not me.guild_permissions.ban_members:
                 await interaction.response.send_message(
                     ":x: Sakamoto needs the Ban Members permission.",
                     ephemeral=True,
@@ -132,7 +132,7 @@ class HoneypotCog(
                 )
                 response = (
                     f":white_check_mark: {channel.mention} is the honeypot. "
-                    "Non-admin messages trigger a softban and recent-message cleanup."
+                    "Messages from human members other than the server owner trigger a softban and recent-message cleanup."
                 )
         if channel is None:
             self.channels.pop(guild.id, None)
@@ -157,11 +157,8 @@ class HoneypotCog(
                 )
                 mark_app_command_failed(interaction)
                 return
-            me = guild.me
-            permissions = channel.permissions_for(me) if me is not None else None
-            if permissions is None or not (
-                permissions.view_channel and permissions.send_messages
-            ):
+            permissions = channel.permissions_for(guild.me)
+            if not (permissions.view_channel and permissions.send_messages):
                 await interaction.response.send_message(
                     ":x: Sakamoto needs View Channel and Send Messages in the log channel.",
                     ephemeral=True,
@@ -190,7 +187,7 @@ class HoneypotCog(
     async def _send_log(self, guild: Guild, member: Member, outcome: str) -> None:
         if (channel_id := self.log_channels.get(guild.id)) is None:
             return
-        if (channel := guild.get_channel(channel_id)) is None:
+        if not isinstance(channel := guild.get_channel(channel_id), TextChannel):
             logger.warning("Honeypot log channel %s is unavailable", channel_id)
             return
         try:
@@ -206,14 +203,13 @@ class HoneypotCog(
     async def on_message(self, message: Message) -> None:
         guild = message.guild
         member = message.author
-        # System events and trusted accounts must never trigger moderation.
+        # System events, bots, and the server owner are exempt.
         if (
             guild is None
             or self.channels.get(guild.id) != message.channel.id
             or message.type not in (MessageType.default, MessageType.reply)
             or not isinstance(member, Member)
             or member.bot
-            or member.guild_permissions.administrator
             or member.id == guild.owner_id
         ):
             return

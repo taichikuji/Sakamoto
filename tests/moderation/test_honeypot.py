@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
-from discord import MessageType
+from discord import MessageType, TextChannel
 
 from extensions.moderation.honeypot import HoneypotCog
 
@@ -69,7 +69,7 @@ async def test_honeypot_softbans_and_cleans_recent_server_messages(monkeypatch):
 @pytest.mark.asyncio
 async def test_honeypot_posts_final_softban_outcome_without_pinging(monkeypatch):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
-    log_channel = SimpleNamespace(send=AsyncMock())
+    log_channel = Mock(spec=TextChannel)
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
@@ -79,7 +79,7 @@ async def test_honeypot_posts_final_softban_outcome_without_pinging(monkeypatch)
 
     log_channel.send.assert_awaited_once()
     args, kwargs = log_channel.send.await_args
-    assert "Softban complete" in args[0]
+    assert "Softbanned; recent messages removed." in args[0]
     assert "<@42>" in args[0]
     assert kwargs["allowed_mentions"].users is False
 
@@ -130,17 +130,38 @@ async def test_log_channel_can_be_set_and_cleared(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("member", [DummyMember(admin=True), DummyMember(bot=True)])
-async def test_honeypot_ignores_admins_and_bots(monkeypatch, member):
+async def test_honeypot_softbans_admins_including_bot_owner(monkeypatch):
+    monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
+    log_channel = Mock(spec=TextChannel)
+    cog = HoneypotCog(SimpleNamespace(is_owner=AsyncMock(return_value=True)))
+    cog.channels[7] = 12
+    cog.log_channels[7] = 99
+    message = _message(DummyMember(admin=True), log_channel=log_channel)
+
+    await cog.on_message(message)
+
+    message.guild.ban.assert_awaited_once()
+    message.guild.unban.assert_awaited_once()
+    message.delete.assert_awaited_once()
+    log_channel.send.assert_awaited_once()
+    cog.bot.is_owner.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", [False, True])
+async def test_honeypot_ignores_bots_and_server_owner(monkeypatch, owner):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
-    message = _message(member)
+    message = _message(DummyMember(bot=not owner))
+    if owner:
+        message.guild.owner_id = message.author.id
 
     await cog.on_message(message)
 
     message.guild.ban.assert_not_awaited()
     message.guild.unban.assert_not_awaited()
+    message.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -163,8 +184,8 @@ async def test_honeypot_deletes_trigger_message_when_ban_fails(monkeypatch):
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
-    log_channel = SimpleNamespace(send=AsyncMock())
-    message = _message(DummyMember(), log_channel=log_channel)
+    log_channel = Mock(spec=TextChannel)
+    message = _message(DummyMember(admin=True), log_channel=log_channel)
     message.guild.ban = AsyncMock(side_effect=RuntimeError("ban failed"))
 
     await cog.on_message(message)
@@ -183,7 +204,7 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
-    log_channel = SimpleNamespace(send=AsyncMock())
+    log_channel = Mock(spec=TextChannel)
     message = _message(DummyMember(), log_channel=log_channel)
     message.guild.unban.side_effect = RuntimeError("unban failed")
 
@@ -192,14 +213,15 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     message.guild.ban.assert_awaited_once()
     message.delete.assert_awaited_once_with()
     assert "manual unban needed" in caplog.text
-    assert "must unban this member" in log_channel.send.await_args.args[0]
+    assert "manual unban required" in log_channel.send.await_args.args[0]
 
 
 @pytest.mark.asyncio
 async def test_log_send_failure_does_not_interrupt_softban(monkeypatch, caplog):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
     monkeypatch.setattr("extensions.moderation.honeypot.HTTPException", RuntimeError)
-    log_channel = SimpleNamespace(send=AsyncMock(side_effect=RuntimeError("no access")))
+    log_channel = Mock(spec=TextChannel)
+    log_channel.send.side_effect = RuntimeError("no access")
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
