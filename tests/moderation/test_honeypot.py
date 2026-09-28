@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
-from discord import MessageType, TextChannel
+from discord import Forbidden, HTTPException, MessageType, NotFound, TextChannel
 
 from extensions.moderation.honeypot import HoneypotCog
 
@@ -18,6 +18,7 @@ class DummyMember:
         self.id = 42
         self.bot = bot
         self.mention = f"<@{self.id}>"
+        self.top_role = 1
         self.guild_permissions = SimpleNamespace(administrator=admin)
 
 
@@ -27,6 +28,9 @@ def _message(
     guild = SimpleNamespace(
         id=7,
         owner_id=99,
+        me=SimpleNamespace(
+            top_role=2, guild_permissions=SimpleNamespace(ban_members=True)
+        ),
         ban=AsyncMock(),
         unban=AsyncMock(),
         get_channel=lambda channel_id: log_channel if channel_id == 99 else None,
@@ -178,21 +182,39 @@ async def test_honeypot_ignores_system_messages(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_honeypot_deletes_trigger_message_when_ban_fails(monkeypatch):
+@pytest.mark.parametrize(
+    ("error_type", "status", "code", "can_ban", "bot_role", "expected"),
+    [
+        (Forbidden, 403, 50013, False, 2, "lacks Ban Members permission"),
+        (Forbidden, 403, 50013, True, 1, "role is not above the member's"),
+        (Forbidden, 403, 50013, True, 2, "Discord HTTP 403, code 50013"),
+        (Forbidden, 403, 50001, True, 2, "Discord HTTP 403, code 50001"),
+        (NotFound, 404, 10013, True, 2, "Discord HTTP 404, code 10013"),
+        (HTTPException, 400, 50035, True, 2, "Discord HTTP 400, code 50035"),
+        (HTTPException, 503, 0, True, 2, "Discord HTTP 503, code 0"),
+    ],
+)
+async def test_honeypot_reports_ban_failure_and_deletes_trigger(
+    monkeypatch, error_type, status, code, can_ban, bot_role, expected
+):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
-    monkeypatch.setattr("extensions.moderation.honeypot.HTTPException", RuntimeError)
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
     log_channel = Mock(spec=TextChannel)
     message = _message(DummyMember(admin=True), log_channel=log_channel)
-    message.guild.ban = AsyncMock(side_effect=RuntimeError("ban failed"))
+    message.guild.me.top_role = bot_role
+    message.guild.me.guild_permissions.ban_members = can_ban
+    message.guild.ban.side_effect = error_type(
+        SimpleNamespace(status=status, reason="Failure"),
+        {"code": code, "message": "Discord rejected the request"},
+    )
 
     await cog.on_message(message)
 
     message.guild.unban.assert_not_awaited()
     message.delete.assert_awaited_once_with()
-    assert "Ban failed" in log_channel.send.await_args.args[0]
+    assert expected in log_channel.send.await_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -200,13 +222,15 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     monkeypatch, caplog
 ):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
-    monkeypatch.setattr("extensions.moderation.honeypot.HTTPException", RuntimeError)
     cog = HoneypotCog(SimpleNamespace())
     cog.channels[7] = 12
     cog.log_channels[7] = 99
     log_channel = Mock(spec=TextChannel)
     message = _message(DummyMember(), log_channel=log_channel)
-    message.guild.unban.side_effect = RuntimeError("unban failed")
+    message.guild.unban.side_effect = Forbidden(
+        SimpleNamespace(status=403, reason="Forbidden"),
+        {"code": 50013, "message": "Missing Permissions"},
+    )
 
     await cog.on_message(message)
 
@@ -214,6 +238,7 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     message.delete.assert_awaited_once_with()
     assert "manual unban needed" in caplog.text
     assert "manual unban required" in log_channel.send.await_args.args[0]
+    assert "HTTP 403, code 50013" in log_channel.send.await_args.args[0]
 
 
 @pytest.mark.asyncio

@@ -223,9 +223,15 @@ class HoneypotCog(
                 delete_message_seconds=3600,
                 reason=f"Posted in spam honeypot channel {message.channel.id}",
             )
-        except HTTPException:
+        except HTTPException as exc:
             logger.exception("Could not ban member %s in guild %s", member.id, guild.id)
-            outcome = "Ban failed; recent messages may remain."
+            detail = f"Discord HTTP {exc.status}, code {exc.code}: {exc.text[:120]}"
+            if exc.code == 50013 and (me := guild.me) is not None:
+                if not me.guild_permissions.ban_members:
+                    detail = "Sakamoto lacks Ban Members permission (Discord 50013)"
+                elif me.top_role <= member.top_role:
+                    detail = "Sakamoto's role is not above the member's (Discord 50013)"
+            outcome = f"Ban failed: {detail}. Recent messages may remain."
         else:
             try:
                 await guild.unban(
@@ -234,13 +240,16 @@ class HoneypotCog(
                 )
             except NotFound:
                 pass  # Already unbanned.
-            except HTTPException:
+            except HTTPException as exc:
                 logger.exception(
                     "Could not finish softban for member %s in guild %s; manual unban needed",
                     member.id,
                     guild.id,
                 )
-                outcome = "Softban incomplete; manual unban required."
+                outcome = (
+                    f"Softban incomplete: unban failed (Discord HTTP {exc.status}, "
+                    f"code {exc.code}: {exc.text[:120]}); manual unban required."
+                )
         # Delete the bait post separately: ban cleanup may not remove it, and
         # this still works when the ban fails.
         try:
