@@ -243,11 +243,11 @@ class HoneypotCog(
                 detail = f"Discord rejected the ban: {reason}"
             if isinstance(exc, DiscordServerError):
                 outcome = (
-                    f"Ban status unknown: {detail}; check whether the member is banned. "
-                    "Recent messages may remain."
+                    f"Ban status unknown: {detail}; check whether the member is banned."
                 )
             else:
-                outcome = f"Ban failed: {detail}. Recent messages may remain."
+                outcome = f"Ban failed: {detail}."
+            outcome += " Recent messages may remain."
         else:
             try:
                 await guild.unban(

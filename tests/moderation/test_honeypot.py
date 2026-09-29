@@ -230,8 +230,27 @@ async def test_honeypot_reports_ban_failure_and_deletes_trigger(
 
 
 @pytest.mark.asyncio
-async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
-    monkeypatch, caplog
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            Forbidden(
+                SimpleNamespace(status=403, reason="Forbidden"),
+                {"code": 50013, "message": "Missing Permissions"},
+            ),
+            "Discord denied the unban: Missing Permissions; manual unban required",
+        ),
+        (
+            DiscordServerError(
+                SimpleNamespace(status=503, reason="Unavailable"),
+                {"code": 0, "message": "API error"},
+            ),
+            "Unban status unknown: Discord server error: API error; check whether the member is banned",
+        ),
+    ],
+)
+async def test_honeypot_logs_unban_error_and_still_deletes_trigger(
+    monkeypatch, caplog, error, expected
 ):
     monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
     cog = HoneypotCog(SimpleNamespace())
@@ -239,41 +258,14 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     cog.log_channels[7] = 99
     log_channel = Mock(spec=TextChannel)
     message = _message(DummyMember(), log_channel=log_channel)
-    message.guild.unban.side_effect = Forbidden(
-        SimpleNamespace(status=403, reason="Forbidden"),
-        {"code": 50013, "message": "Missing Permissions"},
-    )
+    message.guild.unban.side_effect = error
 
     await cog.on_message(message)
 
     message.guild.ban.assert_awaited_once()
     message.delete.assert_awaited_once_with()
     assert "Could not finish softban" in caplog.text
-    assert "manual unban required" in log_channel.send.await_args.args[0]
-    assert (
-        "Discord denied the unban: Missing Permissions"
-        in log_channel.send.await_args.args[0]
-    )
-
-
-@pytest.mark.asyncio
-async def test_honeypot_reports_unknown_unban_after_server_error(monkeypatch):
-    monkeypatch.setattr("extensions.moderation.honeypot.Member", DummyMember)
-    cog = HoneypotCog(SimpleNamespace())
-    cog.channels[7] = 12
-    cog.log_channels[7] = 99
-    log_channel = Mock(spec=TextChannel)
-    message = _message(DummyMember(), log_channel=log_channel)
-    message.guild.unban.side_effect = DiscordServerError(
-        SimpleNamespace(status=503, reason="Unavailable"),
-        {"code": 0, "message": "API error"},
-    )
-
-    await cog.on_message(message)
-
-    message.delete.assert_awaited_once_with()
-    assert "Unban status unknown" in log_channel.send.await_args.args[0]
-    assert "check whether the member is banned" in log_channel.send.await_args.args[0]
+    assert expected in log_channel.send.await_args.args[0]
 
 
 @pytest.mark.asyncio
