@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from aiosqlite import connect
 from discord import (
     AllowedMentions,
+    DiscordServerError,
+    Forbidden,
     Guild,
     HTTPException,
     Interaction,
@@ -223,9 +225,23 @@ class HoneypotCog(
                 delete_message_seconds=3600,
                 reason=f"Posted in spam honeypot channel {message.channel.id}",
             )
-        except HTTPException:
+        except HTTPException as exc:
             logger.exception("Could not ban member %s in guild %s", member.id, guild.id)
-            outcome = "Ban failed; recent messages may remain."
+            reason = exc.text.replace("\n", " ")[:120] or "no details"
+            if isinstance(exc, Forbidden):
+                detail = f"Discord denied the ban: {reason}"
+                if exc.code == 50013 and (me := guild.me) is not None:
+                    if not me.guild_permissions.ban_members:
+                        detail = "Sakamoto lacks Ban Members permission"
+                    elif me.top_role <= member.top_role:
+                        detail = "Sakamoto's role is not above the member's"
+            elif isinstance(exc, NotFound):
+                detail = f"Discord could not find the requested resource: {reason}"
+            elif isinstance(exc, DiscordServerError):
+                detail = f"Discord server error: {reason}"
+            else:
+                detail = f"Discord rejected the ban: {reason}"
+            outcome = f"Ban failed: {detail}. Recent messages may remain."
         else:
             try:
                 await guild.unban(
@@ -234,13 +250,21 @@ class HoneypotCog(
                 )
             except NotFound:
                 pass  # Already unbanned.
-            except HTTPException:
+            except HTTPException as exc:
                 logger.exception(
                     "Could not finish softban for member %s in guild %s; manual unban needed",
                     member.id,
                     guild.id,
                 )
-                outcome = "Softban incomplete; manual unban required."
+                detail = (
+                    "Discord denied the unban"
+                    if isinstance(exc, Forbidden)
+                    else "Unban failed"
+                )
+                reason = exc.text.replace("\n", " ")[:120] or "no details"
+                outcome = (
+                    f"Softban incomplete: {detail}: {reason}; manual unban required."
+                )
         # Delete the bait post separately: ban cleanup may not remove it, and
         # this still works when the ban fails.
         try:
