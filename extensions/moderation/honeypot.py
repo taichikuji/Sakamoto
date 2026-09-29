@@ -90,21 +90,34 @@ class HoneypotCog(
         if (guild := interaction.guild) is None:
             return
         if channel is not None:
-            me = guild.me
-            error = None
             if channel.id == self.log_channels.get(guild.id):
-                error = "The honeypot and log channels must be different."
-            elif not me.guild_permissions.ban_members:
-                error = "Sakamoto needs the Ban Members permission."
-            elif not channel.permissions_for(me).view_channel:
-                error = "Sakamoto needs View Channel permission."
-            else:
-                everyone = channel.permissions_for(guild.default_role)
-                # Scam posts may consist only of an image, so attachments must work too.
-                if not everyone.send_messages or not everyone.attach_files:
-                    error = "Everyone needs Send Messages and Attach Files permissions."
-            if error:
-                await interaction.response.send_message(f":x: {error}", ephemeral=True)
+                await interaction.response.send_message(
+                    ":x: The honeypot and log channels must be different.",
+                    ephemeral=True,
+                )
+                mark_app_command_failed(interaction)
+                return
+            me = guild.me
+            if not me.guild_permissions.ban_members:
+                await interaction.response.send_message(
+                    ":x: Sakamoto needs the Ban Members permission.",
+                    ephemeral=True,
+                )
+                mark_app_command_failed(interaction)
+                return
+            if not channel.permissions_for(me).view_channel:
+                await interaction.response.send_message(
+                    ":x: Sakamoto needs View Channel permission.", ephemeral=True
+                )
+                mark_app_command_failed(interaction)
+                return
+            everyone = channel.permissions_for(guild.default_role)
+            # Scam posts may consist only of an image, so attachments must work too.
+            if not everyone.send_messages or not everyone.attach_files:
+                await interaction.response.send_message(
+                    ":x: Everyone needs Send Messages and Attach Files permissions.",
+                    ephemeral=True,
+                )
                 mark_app_command_failed(interaction)
                 return
 
@@ -139,15 +152,19 @@ class HoneypotCog(
         if (guild := interaction.guild) is None:
             return
         if channel is not None:
-            error = None
             if channel.id == self.channels.get(guild.id):
-                error = "The honeypot and log channels must be different."
-            else:
-                permissions = channel.permissions_for(guild.me)
-                if not (permissions.view_channel and permissions.send_messages):
-                    error = "Sakamoto needs View Channel and Send Messages in the log channel."
-            if error:
-                await interaction.response.send_message(f":x: {error}", ephemeral=True)
+                await interaction.response.send_message(
+                    ":x: The honeypot and log channels must be different.",
+                    ephemeral=True,
+                )
+                mark_app_command_failed(interaction)
+                return
+            permissions = channel.permissions_for(guild.me)
+            if not (permissions.view_channel and permissions.send_messages):
+                await interaction.response.send_message(
+                    ":x: Sakamoto needs View Channel and Send Messages in the log channel.",
+                    ephemeral=True,
+                )
                 mark_app_command_failed(interaction)
                 return
 
