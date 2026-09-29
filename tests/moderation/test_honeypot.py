@@ -2,7 +2,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
-from discord import Forbidden, HTTPException, MessageType, NotFound, TextChannel
+from discord import (
+    DiscordServerError,
+    Forbidden,
+    HTTPException,
+    MessageType,
+    NotFound,
+    TextChannel,
+)
 
 from extensions.moderation.honeypot import HoneypotCog
 
@@ -187,11 +194,10 @@ async def test_honeypot_ignores_system_messages(monkeypatch):
     [
         (Forbidden, 403, 50013, False, 2, "lacks Ban Members permission"),
         (Forbidden, 403, 50013, True, 1, "role is not above the member's"),
-        (Forbidden, 403, 50013, True, 2, "Discord HTTP 403, code 50013"),
-        (Forbidden, 403, 50001, True, 2, "Discord HTTP 403, code 50001"),
-        (NotFound, 404, 10013, True, 2, "Discord HTTP 404, code 10013"),
-        (HTTPException, 400, 50035, True, 2, "Discord HTTP 400, code 50035"),
-        (HTTPException, 503, 0, True, 2, "Discord HTTP 503, code 0"),
+        (Forbidden, 403, 50013, True, 2, "denied the ban: API error"),
+        (NotFound, 404, 10013, True, 2, "requested resource: API error"),
+        (HTTPException, 400, 50035, True, 2, "rejected the ban: API error"),
+        (DiscordServerError, 503, 0, True, 2, "server error: API error"),
     ],
 )
 async def test_honeypot_reports_ban_failure_and_deletes_trigger(
@@ -207,7 +213,7 @@ async def test_honeypot_reports_ban_failure_and_deletes_trigger(
     message.guild.me.guild_permissions.ban_members = can_ban
     message.guild.ban.side_effect = error_type(
         SimpleNamespace(status=status, reason="Failure"),
-        {"code": code, "message": "Discord rejected the request"},
+        {"code": code, "message": "API error"},
     )
 
     await cog.on_message(message)
@@ -215,6 +221,7 @@ async def test_honeypot_reports_ban_failure_and_deletes_trigger(
     message.guild.unban.assert_not_awaited()
     message.delete.assert_awaited_once_with()
     assert expected in log_channel.send.await_args.args[0]
+    assert "Discord HTTP" not in log_channel.send.await_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -238,7 +245,10 @@ async def test_honeypot_logs_unban_failure_and_still_deletes_trigger(
     message.delete.assert_awaited_once_with()
     assert "manual unban needed" in caplog.text
     assert "manual unban required" in log_channel.send.await_args.args[0]
-    assert "HTTP 403, code 50013" in log_channel.send.await_args.args[0]
+    assert (
+        "Discord denied the unban: Missing Permissions"
+        in log_channel.send.await_args.args[0]
+    )
 
 
 @pytest.mark.asyncio
