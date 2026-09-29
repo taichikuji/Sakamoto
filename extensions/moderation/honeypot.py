@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from aiosqlite import connect
 from discord import (
     AllowedMentions,
+    DiscordServerError,
+    Forbidden,
     Guild,
     HTTPException,
     Interaction,
@@ -88,34 +90,21 @@ class HoneypotCog(
         if (guild := interaction.guild) is None:
             return
         if channel is not None:
-            if channel.id == self.log_channels.get(guild.id):
-                await interaction.response.send_message(
-                    ":x: The honeypot and log channels must be different.",
-                    ephemeral=True,
-                )
-                mark_app_command_failed(interaction)
-                return
             me = guild.me
-            if not me.guild_permissions.ban_members:
-                await interaction.response.send_message(
-                    ":x: Sakamoto needs the Ban Members permission.",
-                    ephemeral=True,
-                )
-                mark_app_command_failed(interaction)
-                return
-            if not channel.permissions_for(me).view_channel:
-                await interaction.response.send_message(
-                    ":x: Sakamoto needs View Channel permission.", ephemeral=True
-                )
-                mark_app_command_failed(interaction)
-                return
-            everyone = channel.permissions_for(guild.default_role)
-            # Scam posts may consist only of an image, so attachments must work too.
-            if not everyone.send_messages or not everyone.attach_files:
-                await interaction.response.send_message(
-                    ":x: Everyone needs Send Messages and Attach Files permissions.",
-                    ephemeral=True,
-                )
+            error = None
+            if channel.id == self.log_channels.get(guild.id):
+                error = "The honeypot and log channels must be different."
+            elif not me.guild_permissions.ban_members:
+                error = "Sakamoto needs the Ban Members permission."
+            elif not channel.permissions_for(me).view_channel:
+                error = "Sakamoto needs View Channel permission."
+            else:
+                everyone = channel.permissions_for(guild.default_role)
+                # Scam posts may consist only of an image, so attachments must work too.
+                if not everyone.send_messages or not everyone.attach_files:
+                    error = "Everyone needs Send Messages and Attach Files permissions."
+            if error:
+                await interaction.response.send_message(f":x: {error}", ephemeral=True)
                 mark_app_command_failed(interaction)
                 return
 
@@ -150,19 +139,15 @@ class HoneypotCog(
         if (guild := interaction.guild) is None:
             return
         if channel is not None:
+            error = None
             if channel.id == self.channels.get(guild.id):
-                await interaction.response.send_message(
-                    ":x: The honeypot and log channels must be different.",
-                    ephemeral=True,
-                )
-                mark_app_command_failed(interaction)
-                return
-            permissions = channel.permissions_for(guild.me)
-            if not (permissions.view_channel and permissions.send_messages):
-                await interaction.response.send_message(
-                    ":x: Sakamoto needs View Channel and Send Messages in the log channel.",
-                    ephemeral=True,
-                )
+                error = "The honeypot and log channels must be different."
+            else:
+                permissions = channel.permissions_for(guild.me)
+                if not (permissions.view_channel and permissions.send_messages):
+                    error = "Sakamoto needs View Channel and Send Messages in the log channel."
+            if error:
+                await interaction.response.send_message(f":x: {error}", ephemeral=True)
                 mark_app_command_failed(interaction)
                 return
 
@@ -223,9 +208,29 @@ class HoneypotCog(
                 delete_message_seconds=3600,
                 reason=f"Posted in spam honeypot channel {message.channel.id}",
             )
-        except HTTPException:
+        except HTTPException as exc:
             logger.exception("Could not ban member %s in guild %s", member.id, guild.id)
-            outcome = "Ban failed; recent messages may remain."
+            reason = exc.text.replace("\n", " ")[:120] or "no details"
+            if isinstance(exc, Forbidden):
+                detail = f"Discord denied the ban: {reason}"
+                if exc.code == 50013 and (me := guild.me) is not None:
+                    if not me.guild_permissions.ban_members:
+                        detail = "Sakamoto lacks Ban Members permission"
+                    elif me.top_role <= member.top_role:
+                        detail = "Sakamoto's role is not above the member's"
+            elif isinstance(exc, NotFound):
+                detail = f"Discord could not find the requested resource: {reason}"
+            elif isinstance(exc, DiscordServerError):
+                detail = f"Discord server error: {reason}"
+            else:
+                detail = f"Discord rejected the ban: {reason}"
+            if isinstance(exc, DiscordServerError):
+                outcome = (
+                    f"Ban status unknown: {detail}; check whether the member is banned."
+                )
+            else:
+                outcome = f"Ban failed: {detail}."
+            outcome += " Recent messages may remain."
         else:
             try:
                 await guild.unban(
@@ -234,13 +239,17 @@ class HoneypotCog(
                 )
             except NotFound:
                 pass  # Already unbanned.
-            except HTTPException:
-                logger.exception(
-                    "Could not finish softban for member %s in guild %s; manual unban needed",
-                    member.id,
-                    guild.id,
-                )
-                outcome = "Softban incomplete; manual unban required."
+            except HTTPException as exc:
+                logger.exception("Unban error for %s in guild %s", member.id, guild.id)
+                reason = exc.text.replace("\n", " ")[:120] or "no details"
+                if isinstance(exc, DiscordServerError):
+                    outcome = (
+                        f"Unban status unknown: Discord server error: {reason}; "
+                        "check whether the member is banned."
+                    )
+                else:
+                    detail = "denied" if isinstance(exc, Forbidden) else "failed"
+                    outcome = f"Unban {detail}: {reason}; manual unban required."
         # Delete the bait post separately: ban cleanup may not remove it, and
         # this still works when the ban fails.
         try:
