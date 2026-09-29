@@ -241,7 +241,13 @@ class HoneypotCog(
                 detail = f"Discord server error: {reason}"
             else:
                 detail = f"Discord rejected the ban: {reason}"
-            outcome = f"Ban failed: {detail}. Recent messages may remain."
+            if isinstance(exc, DiscordServerError):
+                outcome = (
+                    f"Ban status unknown: {detail}; check whether the member is banned. "
+                    "Recent messages may remain."
+                )
+            else:
+                outcome = f"Ban failed: {detail}. Recent messages may remain."
         else:
             try:
                 await guild.unban(
@@ -252,7 +258,7 @@ class HoneypotCog(
                 pass  # Already unbanned.
             except HTTPException as exc:
                 logger.exception(
-                    "Could not finish softban for member %s in guild %s; manual unban needed",
+                    "Could not finish softban for member %s in guild %s",
                     member.id,
                     guild.id,
                 )
@@ -262,9 +268,13 @@ class HoneypotCog(
                     else "Unban failed"
                 )
                 reason = exc.text.replace("\n", " ")[:120] or "no details"
-                outcome = (
-                    f"Softban incomplete: {detail}: {reason}; manual unban required."
-                )
+                if isinstance(exc, DiscordServerError):
+                    outcome = (
+                        f"Unban status unknown: Discord server error: {reason}; "
+                        "check whether the member is banned."
+                    )
+                else:
+                    outcome = f"Softban incomplete: {detail}: {reason}; manual unban required."
         # Delete the bait post separately: ban cleanup may not remove it, and
         # this still works when the ban fails.
         try:
