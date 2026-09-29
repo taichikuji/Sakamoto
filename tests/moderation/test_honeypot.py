@@ -238,7 +238,7 @@ async def test_honeypot_reports_ban_failure_and_deletes_trigger(
                 SimpleNamespace(status=403, reason="Forbidden"),
                 {"code": 50013, "message": "Missing Permissions"},
             ),
-            "Discord denied the unban: Missing Permissions; manual unban required",
+            "Unban denied: Missing Permissions; manual unban required",
         ),
         (
             DiscordServerError(
@@ -264,7 +264,7 @@ async def test_honeypot_logs_unban_error_and_still_deletes_trigger(
 
     message.guild.ban.assert_awaited_once()
     message.delete.assert_awaited_once_with()
-    assert "Could not finish softban" in caplog.text
+    assert "Unban error" in caplog.text
     assert expected in log_channel.send.await_args.args[0]
 
 
