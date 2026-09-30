@@ -16,7 +16,7 @@ class ReplaceCog(commands.Cog):
             "fixupx.com": ("x.com", "twitter.com"),
             "fxbsky.app": ("bsky.social", "bsky.app"),
             "vm.tnktok.com": ("tiktok.com", "vm.tiktok.com"),
-            "instagram7.com": ("instagram.com",),
+            "kirkstagram.com": ("instagram.com",),
         }
         self.replacements = tuple(
             (f"{prefix}{source}/", f"https://{target}/")
