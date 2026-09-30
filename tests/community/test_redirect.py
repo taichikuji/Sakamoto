@@ -30,8 +30,8 @@ from extensions.community.redirect import ReplaceCog
             "clip https://vm.tnktok.com/abc123/",
         ),
         (
-            "photo https://instagram.com/p/abc",
-            "photo https://instagram7.com/p/abc",
+            "photo https://instagram.com/p/abc?stkn=123",
+            "photo https://kirkstagram.com/p/abc?stkn=123",
         ),
     ],
 )
