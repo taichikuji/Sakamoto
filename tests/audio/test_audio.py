@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from yt_dlp import YoutubeDL
+from yt_dlp.extractor.common import InfoExtractor
+from yt_dlp.utils import DownloadError, ExtractorError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -839,14 +842,17 @@ async def test_play_hides_voice_connection_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_play_cleans_new_connection_when_source_lookup_fails(monkeypatch, caplog):
+@pytest.mark.parametrize("error_type", [RuntimeError, DownloadError])
+async def test_play_cleans_new_connection_when_source_lookup_fails(
+    monkeypatch, caplog, error_type
+):
     connected_client = DummyVoiceClient(connected=True)
     voice_channel = DummyVoiceChannel(connected_client=connected_client)
     interaction = _make_interaction(
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
     )
     cog = MusicCog(_make_bot())
-    cog.resolve_source = AsyncMock(side_effect=RuntimeError("yt-dlp failed"))
+    cog.resolve_source = AsyncMock(side_effect=error_type("yt-dlp failed"))
     monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
 
     await MusicCog.play.callback(cog, interaction, query="missing")
@@ -933,6 +939,41 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
     )
     with pytest.raises(ValueError, match="No results found"):
         cog.search_source("missing")
+
+
+def test_search_source_preserves_extraction_errors_and_flat_playlists(monkeypatch):
+    unavailable_url = "https://extractor.invalid/unavailable"
+
+    class OfflineIE(InfoExtractor):
+        _VALID_URL = r"(?:ytsearch1:|https://extractor\.invalid/)(?P<id>.+)"
+
+        def _real_extract(self, url):
+            if url == unavailable_url:
+                raise ExtractorError("Video unavailable", expected=True)
+            identifier = self._match_id(url)
+            entries = (
+                []
+                if identifier == "empty"
+                else [self.url_result(unavailable_url, self.ie_key(), "unavailable")]
+            )
+            return self.playlist_result(entries, identifier)
+
+    def youtube_dl(options):
+        ydl = YoutubeDL(options, auto_init=False)
+        ydl.add_info_extractor(OfflineIE())
+        return ydl
+
+    monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
+    cog = MusicCog(_make_bot())
+
+    for query in ("unavailable", unavailable_url):
+        with pytest.raises(DownloadError, match="Video unavailable"):
+            cog.search_source(query)
+    playlist = cog.search_source("https://extractor.invalid/playlist")
+    assert playlist["_type"] == "playlist"
+    assert [entry["url"] for entry in playlist["entries"]] == [unavailable_url]
+    with pytest.raises(ValueError, match="No results found"):
+        cog.search_source("empty")
 
 
 @pytest.mark.asyncio

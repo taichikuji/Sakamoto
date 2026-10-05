@@ -244,7 +244,6 @@ class MusicCog(commands.Cog):
             "quiet": True,
             "no_warnings": True,
             "source_address": "0.0.0.0",
-            "ignoreerrors": True,
             # Enable only after restoring QuickJS and yt-dlp-ejs in the image.
             # "js_runtimes": {"quickjs": {}},
             "extract_flat": "in_playlist" if is_url else False,
