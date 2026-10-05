@@ -78,7 +78,6 @@ Extensions live in `extensions/`, grouped by responsibility:
 
 - `general.help` — Browse available commands or get details about one.
 - `general.info` — View bot information and uptime.
-- `general.ping` — Check bot latency.
 
 **Integrations**
 

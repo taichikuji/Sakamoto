@@ -22,7 +22,7 @@ from extensions.core.analytics import (
 
 def _bot(tmp_path=None):
     commands = [
-        SimpleNamespace(qualified_name="ping"),
+        SimpleNamespace(qualified_name="info"),
         SimpleNamespace(qualified_name="radio search"),
     ]
     return SimpleNamespace(
@@ -51,8 +51,8 @@ def test_retention_query_deletes_expired_daily_rows():
     db.executemany(
         UPSERT_SQL,
         [
-            ("2026-06-14", "ping", 1, 0),
-            ("2026-06-15", "ping", 1, 0),
+            ("2026-06-14", "info", 1, 0),
+            ("2026-06-15", "info", 1, 0),
         ],
     )
 
@@ -91,7 +91,7 @@ async def test_completion_and_failure_record_all_guild_command_names(tmp_path):
         SimpleNamespace(guild_id=10), SimpleNamespace(qualified_name="analytics")
     )
     await cog.on_app_command_failure(
-        SimpleNamespace(guild_id=10), SimpleNamespace(qualified_name="ping")
+        SimpleNamespace(guild_id=10), SimpleNamespace(qualified_name="info")
     )
     await cog.on_app_command_completion(SimpleNamespace(guild_id=None), command)
 
@@ -101,7 +101,7 @@ async def test_completion_and_failure_record_all_guild_command_names(tmp_path):
     assert cog._record_safely.await_args_list[1].kwargs == {"succeeded": False}
     assert cog._record_safely.await_args_list[2].args == ("analytics",)
     assert cog._record_safely.await_args_list[2].kwargs == {"succeeded": True}
-    assert cog._record_safely.await_args_list[3].args == ("ping",)
+    assert cog._record_safely.await_args_list[3].args == ("info",)
     assert cog._record_safely.await_args_list[3].kwargs == {"succeeded": False}
     assert cog._record_safely.await_count == 4
 
@@ -113,7 +113,7 @@ async def test_tracking_failure_is_logged_and_isolated(monkeypatch, tmp_path):
     logger = MagicMock()
     monkeypatch.setattr("extensions.core.analytics.logger", logger)
 
-    await cog._record_safely("ping", succeeded=True)
+    await cog._record_safely("info", succeeded=True)
 
     logger.warning.assert_called_once()
 
@@ -129,8 +129,8 @@ async def test_database_writes_reuse_autocommit_connection(monkeypatch, tmp_path
     monkeypatch.setattr(cog.delete_expired_daily, "start", MagicMock())
 
     await cog.cog_load()
-    await cog._record("ping", succeeded=True)
-    await cog._record("ping", succeeded=False)
+    await cog._record("info", succeeded=True)
+    await cog._record("info", succeeded=False)
     await cog.delete_expired_daily.coro(cog)
     await cog.cog_unload()
 
@@ -166,14 +166,14 @@ async def test_analytics_report_shows_usage_failures_and_unused_commands(tmp_pat
             app_commands.Command(
                 name="analytics", description="Stats", callback=callback
             ),
-            app_commands.Command(name="ping", description="Ping", callback=callback),
+            app_commands.Command(name="info", description="Info", callback=callback),
             app_commands.Command(
                 name="unused", description="Unused", callback=callback
             ),
         ]
     )
     cog = AnalyticsCog(bot)
-    cog._fetch_stats = AsyncMock(return_value=[("ping", 8, 2), ("analytics", 20, 0)])
+    cog._fetch_stats = AsyncMock(return_value=[("info", 8, 2), ("analytics", 20, 0)])
     interaction = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
 
     await AnalyticsCog.analytics.callback(cog, interaction, 30)

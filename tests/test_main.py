@@ -73,7 +73,7 @@ async def test_setup_hook_loads_public_extensions_and_continues_after_failure(
         main_module.Path,
         "rglob",
         lambda _self, _pattern: [
-            Path("extensions/general/ping.py"),
+            Path("extensions/general/info.py"),
             Path("extensions/_private.py"),
             Path("extensions/community/redirect.py"),
         ],
@@ -82,7 +82,7 @@ async def test_setup_hook_loads_public_extensions_and_continues_after_failure(
     await bot.setup_hook()
 
     assert bot.session is session
-    assert bot.load_extension.await_args_list[0].args == ("extensions.general.ping",)
+    assert bot.load_extension.await_args_list[0].args == ("extensions.general.info",)
     assert bot.load_extension.await_args_list[1].args == (
         "extensions.community.redirect",
     )
