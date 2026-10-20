@@ -8,7 +8,7 @@ This project has come a long way. Originally called Miia-Py, then Ui-Py.
   <img src="media/icon.webp" width="150" alt="Sakamoto icon"><br>
   <img src="https://img.shields.io/github/license/taichikuji/Sakamoto?color=FF3351&logo=github" alt="License">
   <img src="https://img.shields.io/github/commit-activity/w/taichikuji/Sakamoto?label=commits&logo=github" alt="Commit activity">
-  <img src="https://img.shields.io/librariesio/github/taichikuji/Miia-Py?logo=github" alt="Dependencies">
+  <a href="Pipfile"><img src="https://img.shields.io/badge/dependencies-Pipfile-blue?logo=github" alt="Dependencies: Pipfile"></a>
 </p>
 
 ## Run
