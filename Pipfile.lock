@@ -1153,12 +1153,12 @@
         },
         "yt-dlp": {
             "hashes": [
-                "sha256:94a3a3e2c423129d0bbd2f1be000c4171fa1226c29e251c84aff868f2851c247",
-                "sha256:cbf748d7d17cd37647c4b9f07b6c25f24384bfd4361407ee5ec519e753d22539"
+                "sha256:a05c5b5d8562f7e8a62f5334348b406af4930d56d3a65f8021d14af0e22339ae",
+                "sha256:abe5c6b94c3b2f0560500add1c42e0a97641752743a5b65588ac2007a6e23eb6"
             ],
             "index": "pypi",
-            "markers": "python_version >= '3.10'",
-            "version": "==2026.10.21"
+            "markers": "python_version >= '3.11'",
+            "version": "==2026.10.26"
         }
     },
     "develop": {
