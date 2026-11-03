@@ -289,6 +289,7 @@ class MusicCog(commands.Cog):
             "duration",
             "duration_string",
             "acodec",
+            "http_headers",
         )
         result = {key: info[key] for key in fields if key in info}
         if "entries" in info:
@@ -367,9 +368,21 @@ class MusicCog(commands.Cog):
 
     @staticmethod
     def _stream(info: dict) -> ResolvedStream | None:
-        if url := info.get("url"):
-            return ResolvedStream(url, info.get("acodec"))
-        return None
+        if not (url := info.get("url")):
+            return None
+        headers = info.get("http_headers")
+        if headers is None:
+            headers = {}
+        if not isinstance(headers, dict) or any(
+            not isinstance(name, str)
+            or not isinstance(value, str)
+            or any(char in name for char in "\r\n:")
+            or "\r" in value
+            or "\n" in value
+            for name, value in headers.items()
+        ):
+            raise ValueError("Invalid playback HTTP headers")
+        return ResolvedStream(url, info.get("acodec"), frozendict(headers))
 
     def stream_valid_until(self, stream_url: str) -> float:
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]

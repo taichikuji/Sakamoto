@@ -5,7 +5,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from random import shuffle
+from shlex import quote
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 from weakref import WeakValueDictionary
 
 from discord import (
@@ -33,6 +35,7 @@ type StreamResolver = Callable[[str], Awaitable[ResolvedStream | None]]
 class ResolvedStream:
     url: str
     codec: str | None = None
+    headers: frozendict[str, str] = field(default_factory=frozendict)
 
 
 @dataclass
@@ -370,13 +373,19 @@ class AudioEngine:
                 return False
             if stream is None:
                 raise ValueError(f"No playable stream URL found for {item.title}")
+            before_options = (
+                "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+                "-analyzeduration 10M -probesize 10M -err_detect ignore_err"
+            )
+            if stream.headers and urlparse(stream.url).scheme in ("http", "https"):
+                headers = "".join(
+                    f"{name}: {value}\r\n" for name, value in stream.headers.items()
+                )
+                before_options += f" -headers {quote(headers)}"
             source = FFmpegOpusAudio(
                 stream.url,
                 codec=stream.codec,
-                before_options=(
-                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-                    "-analyzeduration 10M -probesize 10M -err_detect ignore_err"
-                ),
+                before_options=before_options,
                 options="-vn",
             )
             session.voice_client.play(

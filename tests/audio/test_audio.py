@@ -3,6 +3,7 @@ import subprocess
 import sys
 from collections import deque
 from pathlib import Path
+from shlex import split
 from time import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -1828,6 +1829,50 @@ async def test_full_queue_rejects_before_source_lookup(monkeypatch):
     interaction.response.send_message.assert_awaited_once_with(
         ":x: Queue is full (50 items).", ephemeral=True
     )
+
+
+@pytest.mark.asyncio
+async def test_playback_preserves_refreshed_codec_and_quoted_http_headers(monkeypatch):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    cog = MusicCog(bot)
+    raw = {
+        "url": "https://media.test/stream",
+        "acodec": "opus",
+        "http_headers": {
+            "Referer": "https://provider.test/watch?title=it's music",
+            "User-Agent": "Media Player/1",
+        },
+    }
+    cog.resolve_source = AsyncMock(return_value=cog._playback_metadata(raw))
+    item = cog.queue_item({"webpage_url": "https://provider.test/watch"})
+    voice = DummyVoiceClient()
+    _add_session(cog.engine, voice)
+    constructor = MagicMock(return_value=object())
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", constructor)
+    assert await cog.engine.play_song(1, item)
+    options = split(constructor.call_args.kwargs["before_options"])
+    assert options[options.index("-headers") + 1] == (
+        "Referer: https://provider.test/watch?title=it's music\r\nUser-Agent: Media Player/1\r\n"
+    )
+    assert constructor.call_args.kwargs["codec"] == "opus"
+    stream = await cog.resolve_stream("https://provider.test/watch")
+    raw["http_headers"]["Referer"] = "changed"
+    assert stream.headers["Referer"] != "changed"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Referer": "safe\r\nInjected: header"},
+        {"Bad:Name": "value"},
+        {"Referer": 123},
+        [],
+    ],
+)
+def test_stream_rejects_malformed_http_headers(headers):
+    with pytest.raises(ValueError, match="HTTP headers"):
+        MusicCog._stream({"url": "https://media.test/audio", "http_headers": headers})
 
 
 @pytest.mark.asyncio
