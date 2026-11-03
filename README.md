@@ -66,7 +66,7 @@ Extensions live in `extensions/`, grouped by responsibility:
 
 **Audio**
 
-- `audio.music` — Search and play songs or audio URLs; manage the queue, skip tracks, or stop playback.
+- `audio.music` — Search and play songs or audio URLs; view `/queue`, `/remove` or `/move` queued tracks, `/clearqueue` while keeping the current track, skip tracks, or stop playback.
 - `audio.radio` — Search Radio Garden stations or play a random station.
 
 **Community**

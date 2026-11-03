@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from discord import (
+    AllowedMentions,
     ButtonStyle,
     Embed,
     HTTPException,
@@ -532,6 +533,86 @@ class MusicCog(commands.Cog):
         view = MusicControls(self, guild_id)
         await interaction.response.send_message(embed=embed, view=view)
         view.message = await interaction.original_response()
+
+    @app_commands.command(
+        name="remove", description="Remove one queued track without stopping playback."
+    )
+    @app_commands.describe(position="Track position in Up Next, starting at 1.")
+    async def remove(
+        self, interaction: Interaction, position: app_commands.Range[int, 1, 50]
+    ):
+        guild_id = interaction.guild_id
+        assert guild_id is not None
+        if (
+            await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
+            is None
+        ):
+            mark_app_command_failed(interaction)
+            return
+        if item := self.engine.remove_track(guild_id, position):
+            await interaction.response.send_message(
+                f":wastebasket: Removed **{escape_markdown(item.title)}** from the queue.",
+                allowed_mentions=AllowedMentions.none(),
+            )
+        else:
+            await interaction.response.send_message(
+                ":x: That queued track does not exist.", ephemeral=True
+            )
+            mark_app_command_failed(interaction)
+
+    @app_commands.command(
+        name="move", description="Move a queued track to another position."
+    )
+    @app_commands.describe(
+        position="Current position in Up Next, starting at 1.",
+        destination="New position in Up Next, starting at 1.",
+    )
+    async def move(
+        self,
+        interaction: Interaction,
+        position: app_commands.Range[int, 1, 50],
+        destination: app_commands.Range[int, 1, 50],
+    ):
+        guild_id = interaction.guild_id
+        assert guild_id is not None
+        if (
+            await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
+            is None
+        ):
+            mark_app_command_failed(interaction)
+            return
+        if self.engine.move_track(guild_id, position, destination):
+            await interaction.response.send_message(
+                f":white_check_mark: Moved queued track {position} to position {destination}."
+            )
+        else:
+            await interaction.response.send_message(
+                ":x: Choose positions that exist in Up Next.", ephemeral=True
+            )
+            mark_app_command_failed(interaction)
+
+    @app_commands.command(
+        name="clearqueue",
+        description="Clear queued tracks while keeping the current track playing.",
+    )
+    async def clearqueue(self, interaction: Interaction):
+        guild_id = interaction.guild_id
+        assert guild_id is not None
+        if (
+            await self.engine.ensure_user_in_same_voice_channel(interaction, guild_id)
+            is None
+        ):
+            mark_app_command_failed(interaction)
+            return
+        if count := self.engine.clear_queue(guild_id):
+            await interaction.response.send_message(
+                f":wastebasket: Cleared {count} queued track{'s' if count != 1 else ''}."
+            )
+        else:
+            await interaction.response.send_message(
+                ":x: The music queue is currently empty.", ephemeral=True
+            )
+            mark_app_command_failed(interaction)
 
     @app_commands.command(
         name="skip",

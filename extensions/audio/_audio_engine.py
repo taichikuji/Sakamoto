@@ -130,6 +130,34 @@ class AudioEngine:
         session.queue.extend(items)
         return True
 
+    def remove_track(self, guild_id: int, position: int) -> QueueItem | None:
+        session = self.sessions.get(guild_id)
+        if session is None or not 1 <= position <= len(session.queue):
+            return None
+        item = session.queue[position - 1]
+        del session.queue[position - 1]
+        return item
+
+    def move_track(self, guild_id: int, position: int, destination: int) -> bool:
+        session = self.sessions.get(guild_id)
+        if session is None or not (
+            1 <= position <= len(session.queue)
+            and 1 <= destination <= len(session.queue)
+        ):
+            return False
+        item = session.queue[position - 1]
+        del session.queue[position - 1]
+        session.queue.insert(destination - 1, item)
+        return True
+
+    def clear_queue(self, guild_id: int) -> int:
+        session = self.sessions.get(guild_id)
+        if session is None:
+            return 0
+        count = len(session.queue)
+        session.queue.clear()
+        return count
+
     async def enqueue_or_play(
         self,
         guild_id: int,

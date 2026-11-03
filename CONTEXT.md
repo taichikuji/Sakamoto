@@ -40,6 +40,8 @@ Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot 
 
 ## Music runtime behavior
 
+- `/remove`, `/move`, and `/clearqueue` change only waiting Queue Entries, using the one-based positions shown in Up Next. Like skip and shuffle, they require the caller to share the bot's voice channel. `/queue` continues to show playback and waiting tracks.
+
 - yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-key cap and automatic expiry. Selected codec and HTTP headers travel with each resolved stream, including after URL refresh.
 - At most four distinct music lookups run across guilds and cog reloads. Identical lookups share work. Callers wait up to 30 seconds; timed-out workers retain their slots until completion. Extraction uses a 10-second socket timeout and one extractor retry; autocomplete uses a two-second HTTP budget.
 - Playback changes belong to the event loop and a specific session and playback identity. A track reserves its start before resolving a missing stream; stale callbacks and resolutions cannot alter newer playback.

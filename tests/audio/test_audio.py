@@ -1893,6 +1893,81 @@ async def test_reload_preserves_shared_engine_and_existing_resolvers():
         assert not old.cache_enabled
 
 
+def test_queue_edits_use_one_based_positions_and_preserve_current_track():
+    engine = AudioEngine(_make_bot())
+    voice = DummyVoiceClient(playing=True)
+    current = QueueItem("current", "Current", "1:00")
+    session = _add_session(
+        engine,
+        voice,
+        current=current,
+        queue=[QueueItem(title, title, "1:00") for title in "ABCD"],
+    )
+    assert engine.remove_track(1, 0) is None
+    assert engine.remove_track(1, 5) is None
+    assert engine.remove_track(1, 2).title == "B"
+    assert engine.move_track(1, 3, 1)
+    assert [item.title for item in session.queue] == ["D", "A", "C"]
+    assert engine.move_track(1, 1, 3)
+    assert [item.title for item in session.queue] == ["A", "C", "D"]
+    assert not engine.move_track(1, 1, 4)
+    assert engine.clear_queue(1) == 3
+    assert engine.clear_queue(1) == 0
+    assert session.current is current
+    voice.stop.assert_not_called()
+    assert engine.remove_track(99, 1) is None
+    assert not engine.move_track(99, 1, 1)
+    assert engine.clear_queue(99) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [(MusicCog.remove, (1,)), (MusicCog.move, (1, 2)), (MusicCog.clearqueue, ())],
+)
+async def test_queue_management_requires_same_voice_channel(command, args):
+    cog = MusicCog(_make_bot())
+    cog.engine.ensure_user_in_same_voice_channel = AsyncMock(return_value=None)
+    session = _add_session(
+        cog.engine, DummyVoiceClient(), queue=[QueueItem("one", "One", "1:00")]
+    )
+    interaction = _make_interaction(user=object())
+    await command.callback(cog, interaction, *args)
+    assert len(session.queue) == 1
+    assert interaction.command_failed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args", "expected"),
+    [
+        (MusicCog.remove, (1,), ["B"]),
+        (MusicCog.move, (1, 2), ["B", "A"]),
+        (MusicCog.clearqueue, (), []),
+    ],
+)
+async def test_queue_management_commands_change_only_waiting_tracks(
+    command, args, expected
+):
+    cog = MusicCog(_make_bot())
+    cog.engine.ensure_user_in_same_voice_channel = AsyncMock(
+        return_value=DummyVoiceClient()
+    )
+    current = QueueItem("current", "Current", "1:00")
+    session = _add_session(
+        cog.engine,
+        DummyVoiceClient(playing=True),
+        current=current,
+        queue=[QueueItem(title, title, "1:00") for title in "AB"],
+    )
+    interaction = _make_interaction(user=object())
+    await command.callback(cog, interaction, *args)
+    assert [item.title for item in session.queue] == expected
+    assert session.current is current
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.command_failed is False
+
+
 @pytest.mark.asyncio
 async def test_reconnect_waits_for_discord_disconnect_to_finish():
     engine = AudioEngine(_make_bot())
