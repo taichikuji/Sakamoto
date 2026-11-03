@@ -40,7 +40,11 @@ Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot 
 
 ## Music runtime behavior
 
-- yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-entry cap and automatic expiry.
+- yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-key cap and automatic expiry. Selected codec and HTTP headers travel with each resolved stream, including after URL refresh.
+- At most four distinct music lookups run across guilds and cog reloads. Identical lookups share work. Callers wait up to 30 seconds; timed-out workers retain their slots until completion. Extraction uses a 10-second socket timeout and one extractor retry; autocomplete uses a two-second HTTP budget.
+- Playback changes belong to the event loop and a specific session and playback identity. A track reserves its start before resolving a missing stream; stale callbacks and resolutions cannot alter newer playback.
+- Known Opus input is copied; other or unknown codecs are encoded to Opus. No additional network probe is needed for a codec already supplied by the extractor.
+- Reloading a provider cog preserves the shared engine and active playback. Existing queue entries retain their original cog's resolver; changes to the internal engine require a process restart. See the contribution guide for the recovery procedure.
 - FFmpeg runs as a child process during playback and exits when playback stops; disconnect cleanup removes the guild's Playback Session and clears its queue, current track, and command channel.
 - Repeated extraction and playback can leave the process at a higher RSS plateau after live objects are released because Python and glibc may retain freed pages. Stable elevated RSS alone does not establish a live-object leak.
 

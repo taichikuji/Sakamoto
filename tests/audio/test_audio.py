@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from discord import Intents
+from discord.ext import commands
 from yt_dlp import YoutubeDL
 from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import DownloadError, ExtractorError
@@ -1873,6 +1875,22 @@ async def test_playback_preserves_refreshed_codec_and_quoted_http_headers(monkey
 def test_stream_rejects_malformed_http_headers(headers):
     with pytest.raises(ValueError, match="HTTP headers"):
         MusicCog._stream({"url": "https://media.test/audio", "http_headers": headers})
+
+
+@pytest.mark.asyncio
+async def test_reload_preserves_shared_engine_and_existing_resolvers():
+    bot = commands.Bot(command_prefix="!", intents=Intents.none())
+    async with bot:
+        await bot.load_extension("extensions.audio.music")
+        old = bot.get_cog("MusicCog")
+        item = old.queue_item({"webpage_url": "source", "url": "stream"})
+        await bot.reload_extension("extensions.audio.music")
+        new = bot.get_cog("MusicCog")
+        assert new is not old
+        assert new.engine is old.engine
+        assert new.source_lookups is old.source_lookups
+        assert item.refresh_stream.__self__ is old
+        assert not old.cache_enabled
 
 
 @pytest.mark.asyncio

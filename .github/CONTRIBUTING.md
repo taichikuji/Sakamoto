@@ -28,6 +28,14 @@ pipenv run ruff format --check .
 pipenv run pytest -q
 ```
 
+## Reloading audio extensions
+
+`/reload audio.music` and `/reload audio.radio` replace their cogs while preserving the shared playback engine, active audio, and queue. Changes to `extensions/audio/_audio_engine.py` require a bot restart.
+
+Existing Queue Entries keep the resolver from the music cog that created them; new commands use the reloaded cog. Use `/stop` before reloading when existing queued tracks should be discarded. Restart the bot when replacing the shared engine itself.
+
+Unloading music clears its cache and cancels its expiry timer. Running extraction work keeps its capacity slot until it finishes, including across reloads; cancelling a command or reaching its waiting deadline does not terminate an executor thread.
+
 ## Pull requests
 
 1. Fork the repository and branch from `main`.
