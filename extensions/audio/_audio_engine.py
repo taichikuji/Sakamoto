@@ -26,7 +26,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-type StreamResolver = Callable[[str], Awaitable[str | None]]
+type StreamResolver = Callable[[str], Awaitable[ResolvedStream | None]]
+
+
+@dataclass(frozen=True)
+class ResolvedStream:
+    url: str
+    codec: str | None = None
 
 
 @dataclass
@@ -34,7 +40,7 @@ class QueueItem:
     source_url: str
     title: str
     duration: str
-    stream_url: str | None = None
+    stream: ResolvedStream | None = None
     refresh_stream: StreamResolver | None = None
 
 
@@ -132,7 +138,7 @@ class AudioEngine:
                 return False
 
             if item.duration != "LIVE":
-                item.stream_url = None
+                item.stream = None
             session.queue.append(item)
             await followup(
                 queue_message
@@ -344,18 +350,19 @@ class AudioEngine:
             return False
         source = None
         try:
-            stream_url = item.stream_url
-            if not stream_url and item.refresh_stream is not None:
-                stream_url = await item.refresh_stream(item.source_url)
+            stream = item.stream
+            if stream is None and item.refresh_stream is not None:
+                stream = await item.refresh_stream(item.source_url)
             if not self._owns_playback(guild_id, session, playback_id):
                 return False
             if not session.voice_client.is_connected():
                 await self.disconnect_and_cleanup(guild_id)
                 return False
-            if not stream_url:
+            if stream is None:
                 raise ValueError(f"No playable stream URL found for {item.title}")
             source = FFmpegOpusAudio(
-                stream_url,
+                stream.url,
+                codec=stream.codec,
                 before_options=(
                     "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
                     "-analyzeduration 10M -probesize 10M -err_detect ignore_err"

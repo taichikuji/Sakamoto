@@ -18,6 +18,7 @@ from extensions.audio._audio_engine import (
     AudioEngine,
     PlaybackSession,
     QueueItem,
+    ResolvedStream,
     get_audio_engine,
 )
 from extensions.audio.music import MusicCog, MusicControls
@@ -321,7 +322,10 @@ async def test_play_song_starts_audio_engine_and_tracks_current_song(monkeypatch
     )
 
     item = QueueItem(
-        "https://example.test/watch", "Track", "3:00", "https://stream.test"
+        "https://example.test/watch",
+        "Track",
+        "3:00",
+        ResolvedStream("https://stream.test"),
     )
     started = await cog.play_song(1, item)
 
@@ -343,7 +347,9 @@ async def test_play_song_cleans_source_when_audio_engine_is_rejected(monkeypatch
         lambda *_args, **_kwargs: source,
     )
 
-    started = await cog.play_song(1, QueueItem("source", "Track", "3:00", "stream"))
+    started = await cog.play_song(
+        1, QueueItem("source", "Track", "3:00", ResolvedStream("stream"))
+    )
 
     assert started is False
     source.cleanup.assert_called_once()
@@ -360,7 +366,12 @@ async def test_play_song_cleans_state_when_voice_client_disappears():
         command_channel=object(),
     )
 
-    assert await cog.play_song(1, QueueItem("url", "Track", "3:00", "stream")) is False
+    assert (
+        await cog.play_song(
+            1, QueueItem("url", "Track", "3:00", ResolvedStream("stream"))
+        )
+        is False
+    )
     assert cog.sessions == {}
 
 
@@ -749,7 +760,11 @@ async def test_play_connects_before_enqueue(monkeypatch):
         user=DummyMember(42, voice_channel=voice_channel), guild_id=1
     )
     cog = MusicCog(_make_bot())
-    cog.engine.enqueue_or_play = AsyncMock()
+    cog.engine.enqueue_or_play = AsyncMock(wraps=cog.engine.enqueue_or_play)
+    monkeypatch.setattr(
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
+        lambda *_args, **_kwargs: object(),
+    )
     monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
 
     async def lookup(_executor, _fn, _arg):
@@ -787,7 +802,7 @@ async def test_failed_play_does_not_move_announcement_channel(monkeypatch):
     previous_channel = SimpleNamespace(send=AsyncMock())
     session = _add_session(
         cog.engine,
-        DummyVoiceClient(connected=True),
+        DummyVoiceClient(connected=True, playing=True),
         command_channel=previous_channel,
     )
     cog.resolve_source = AsyncMock(
@@ -1027,7 +1042,7 @@ async def test_resolve_source_reuses_cached_query_and_stream_url(monkeypatch):
 
     assert await cog.resolve_source("Track") is info
     assert await cog.resolve_source("track") is info
-    assert await cog.refresh_stream_url(source_url) == stream_url
+    assert await cog.resolve_stream(source_url) == ResolvedStream(stream_url)
     assert "expired" not in cog.source_cache
     cog.search_source.assert_called_once_with("Track")
 
@@ -1224,7 +1239,9 @@ async def test_enqueue_or_play_queues_when_playing():
             "https://radio.garden/listen/mataroradio/sFtKSe5I",
             "Mataro Radio",
             "LIVE",
-            "https://radio.garden/api/ara/content/listen/sFtKSe5I/channel.mp3",
+            ResolvedStream(
+                "https://radio.garden/api/ara/content/listen/sFtKSe5I/channel.mp3"
+            ),
         ),
         followup=followup,
     )
@@ -1232,7 +1249,7 @@ async def test_enqueue_or_play_queues_when_playing():
     item = cog.queue_snapshot(1)[1][0]
     assert item.title == "Mataro Radio"
     assert (
-        item.stream_url
+        item.stream.url
         == "https://radio.garden/api/ara/content/listen/sFtKSe5I/channel.mp3"
     )
     assert succeeded is True
@@ -1262,17 +1279,22 @@ async def test_media_title_cannot_inject_mentions_or_markdown():
 
 
 @pytest.mark.asyncio
-async def test_automatic_media_announcement_is_safe():
+async def test_automatic_media_announcement_is_safe(monkeypatch):
     channel = SimpleNamespace(send=AsyncMock())
     cog = AudioEngine(_make_bot())
-    _add_session(cog, DummyVoiceClient(connected=True), command_channel=channel)
-    cog.play_song = AsyncMock(return_value=True)
     title = "@everyone <@123> <@&456> **bold** _italic_"
-
-    await cog.play_next_track_and_announce(
-        1, QueueItem("https://example.test/track", title, "3:00")
+    item = QueueItem(
+        "https://example.test/track", title, "3:00", ResolvedStream("stream")
     )
-
+    session = _add_session(
+        cog, DummyVoiceClient(), queue=[item], command_channel=channel
+    )
+    monkeypatch.setattr(
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
+        lambda *_args, **_kwargs: object(),
+    )
+    cog.play_next(1, session, session.playback_id)
+    await asyncio.gather(*cog.tasks)
     sent = channel.send.await_args
     assert r"@everyone <@123> <@&456> \*\*bold\*\* \_italic\_" in sent.args[0]
     allowed_mentions = sent.kwargs["allowed_mentions"]
@@ -1287,7 +1309,7 @@ async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch
     cog = AudioEngine(_make_bot())
     session = _add_session(cog, vc)
     followup = AsyncMock()
-    refresh_stream = AsyncMock(return_value="https://stream.test/fresh")
+    refresh_stream = AsyncMock(return_value=ResolvedStream("https://stream.test/fresh"))
     monkeypatch.setattr(
         "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda stream_url, **_kw: f"audio:{stream_url}",
@@ -1296,7 +1318,7 @@ async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch
         "https://youtube.test/watch?v=abc",
         "Track",
         "3:00",
-        "https://stream.test/stale",
+        ResolvedStream("https://stream.test/stale"),
         refresh_stream,
     )
 
@@ -1308,8 +1330,9 @@ async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch
 
     assert session.queue.popleft() is item
     assert item.source_url == "https://youtube.test/watch?v=abc"
-    assert item.stream_url is None
+    assert item.stream is None
 
+    vc.stop()
     await cog._play_song(
         1, cog.sessions[1], item, cog._reserve(cog.sessions[1], item), announce=True
     )
@@ -1331,7 +1354,7 @@ async def test_enqueue_or_play_rejects_when_queue_is_full():
             "https://youtube.test/watch?v=abc",
             "Track",
             "3:00",
-            "https://stream.test/live",
+            ResolvedStream("https://stream.test/live"),
         ),
         followup=followup,
     )
@@ -1502,7 +1525,7 @@ async def test_disconnect_and_cleanup_stops_disconnected_player():
 @pytest.mark.asyncio
 async def test_play_next_pulls_from_queue(monkeypatch):
     engine = AudioEngine(_make_bot())
-    item = QueueItem("url", "title", "3:00", "stream")
+    item = QueueItem("url", "title", "3:00", ResolvedStream("stream"))
     session = _add_session(engine, DummyVoiceClient(), queue=[item])
     monkeypatch.setattr(
         "extensions.audio._audio_engine.FFmpegOpusAudio",
@@ -1588,7 +1611,9 @@ async def test_old_audio_callback_cannot_stop_new_playback(
         "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda *_args, **_kwargs: object(),
     )
-    assert await engine.play_song(1, QueueItem("old", "Old", "1:00", "old-stream"))
+    assert await engine.play_song(
+        1, QueueItem("old", "Old", "1:00", ResolvedStream("old-stream"))
+    )
     old_callback = voice.play.call_args.kwargs["after"]
     if replace_session:
         await engine.disconnect_and_cleanup(1)
@@ -1596,7 +1621,9 @@ async def test_old_audio_callback_cannot_stop_new_playback(
         _add_session(engine, voice)
     else:
         assert engine.skip_tracks(1, 1)
-    assert await engine.play_song(1, QueueItem("new", "New", "1:00", "new-stream"))
+    assert await engine.play_song(
+        1, QueueItem("new", "New", "1:00", ResolvedStream("new-stream"))
+    )
     await asyncio.to_thread(old_callback, None)
     await asyncio.sleep(0)
     await asyncio.gather(*engine.tasks)
@@ -1620,7 +1647,7 @@ async def test_pending_start_cannot_overwrite_new_playback(
     async def refresh(_url):
         started.set()
         await release.wait()
-        return "old-stream"
+        return ResolvedStream("old-stream")
 
     monkeypatch.setattr(
         "extensions.audio._audio_engine.FFmpegOpusAudio",
@@ -1629,7 +1656,13 @@ async def test_pending_start_cannot_overwrite_new_playback(
     old = QueueItem("old", "Old", "1:00", refresh_stream=refresh)
     pending = asyncio.create_task(engine.enqueue_playlist(1, [old], AsyncMock()))
     await started.wait()
-    new = QueueItem("new", "New", "1:00", "new-stream")
+    new = QueueItem(
+        "new",
+        "New",
+        "1:00",
+        ResolvedStream("new-stream"),
+        AsyncMock(return_value=ResolvedStream("new-stream")),
+    )
     if replace_session:
         await engine.disconnect_and_cleanup(1)
         voice = DummyVoiceClient()
@@ -1688,6 +1721,25 @@ async def test_failed_request_does_not_disconnect_another_pending_request():
         voice.disconnect.assert_not_awaited()
     voice.disconnect.assert_awaited_once()
     assert not engine.sessions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("codec", ["opus", "mp4a.40.2", None])
+async def test_selected_codec_survives_resolution_and_refresh(monkeypatch, codec):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    cog = MusicCog(bot)
+    cog.resolve_source = AsyncMock(return_value={"url": "fresh", "acodec": codec})
+    item = cog.queue_item({"webpage_url": "source", "url": "old", "acodec": "opus"})
+    assert item.stream == ResolvedStream("old", "opus")
+    item.stream = None
+    voice = DummyVoiceClient()
+    _add_session(cog.engine, voice)
+    constructor = MagicMock(return_value=object())
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", constructor)
+    assert await cog.engine.play_song(1, item)
+    assert constructor.call_args.args == ("fresh",)
+    assert constructor.call_args.kwargs["codec"] == codec
 
 
 @pytest.mark.asyncio

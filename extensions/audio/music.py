@@ -21,7 +21,7 @@ lazy from yt_dlp import YoutubeDL
 
 from extensions.core.analytics import mark_app_command_failed
 
-from ._audio_engine import QueueItem, get_audio_engine
+from ._audio_engine import QueueItem, ResolvedStream, get_audio_engine
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -259,6 +259,7 @@ class MusicCog(commands.Cog):
             "title",
             "duration",
             "duration_string",
+            "acodec",
         )
         result = {key: info[key] for key in fields if key in info}
         if "entries" in info:
@@ -318,9 +319,14 @@ class MusicCog(commands.Cog):
                 delay, self._expire_sources
             )
 
-    async def refresh_stream_url(self, source_url: str) -> str | None:
-        info = await self.resolve_source(source_url)
-        return self._first_track(info).get("url")
+    async def resolve_stream(self, source_url: str) -> ResolvedStream | None:
+        return self._stream(self._first_track(await self.resolve_source(source_url)))
+
+    @staticmethod
+    def _stream(info: dict) -> ResolvedStream | None:
+        if url := info.get("url"):
+            return ResolvedStream(url, info.get("acodec"))
+        return None
 
     def stream_valid_until(self, stream_url: str) -> float:
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]
@@ -383,8 +389,8 @@ class MusicCog(commands.Cog):
             title=track_info.get("title", "Unknown Title"),
             duration=track_info.get("duration_string")
             or self._format_duration(track_info.get("duration")),
-            stream_url=track_info.get("url"),
-            refresh_stream=self.refresh_stream_url,
+            stream=self._stream(track_info),
+            refresh_stream=self.resolve_stream,
         )
 
     def playlist_items(self, entries: list[dict]) -> list[QueueItem]:
@@ -392,7 +398,7 @@ class MusicCog(commands.Cog):
         for entry in entries:
             try:
                 item = self.queue_item(entry)
-                item.stream_url = None
+                item.stream = None
                 items.append(item)
             except ValueError:
                 continue

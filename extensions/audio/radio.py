@@ -10,7 +10,7 @@ from discord.utils import escape_markdown
 
 from extensions.core.analytics import mark_app_command_failed
 
-from ._audio_engine import QueueItem, get_audio_engine
+from ._audio_engine import QueueItem, ResolvedStream, get_audio_engine
 
 if TYPE_CHECKING:
     from main import Sakamoto
@@ -158,7 +158,7 @@ class RadioCog(
                     source_url=self.radio_stream_url(station.channel_id),
                     title=station.title,
                     duration="LIVE",
-                    stream_url=stream_url,
+                    stream=ResolvedStream(stream_url),
                 ),
                 followup=interaction.followup.send,
                 now_playing_message=(
