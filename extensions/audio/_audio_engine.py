@@ -1,10 +1,12 @@
 import logging
-from asyncio import run_coroutine_threadsafe
+from asyncio import CancelledError, Lock, Task, create_task
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from random import shuffle
 from typing import TYPE_CHECKING
+from weakref import WeakValueDictionary
 
 from discord import (
     AllowedMentions,
@@ -44,6 +46,16 @@ class PlaybackSession:
     queue: deque[QueueItem] = field(default_factory=deque)
     current: QueueItem | None = None
     command_channel: Messageable | None = None
+    playback_id: object | None = None
+    requests: int = 0
+
+    @property
+    def busy(self) -> bool:
+        return (
+            self.current is not None
+            or self.voice_client.is_playing()
+            or self.voice_client.is_paused()
+        )
 
 
 class AudioEngine:
@@ -52,13 +64,17 @@ class AudioEngine:
     def __init__(self, bot: Sakamoto):
         self.bot = bot
         self.sessions: dict[int, PlaybackSession] = {}
+        self.connection_locks: WeakValueDictionary[int, Lock] = WeakValueDictionary()
+        self.tasks: set[Task] = set()
 
     def is_connected(self, guild_id: int) -> bool:
         session = self.sessions.get(guild_id)
         return bool(session and session.voice_client.is_connected())
 
-    def set_command_channel(self, guild_id: int, channel: Messageable) -> None:
-        if session := self.sessions.get(guild_id):
+    def set_command_channel(
+        self, guild_id: int, session: PlaybackSession, channel: Messageable
+    ) -> None:
+        if self.sessions.get(guild_id) is session:
             session.command_channel = channel
 
     def queue_snapshot(
@@ -78,7 +94,10 @@ class AudioEngine:
             return False
         for _ in range(amount - 1):
             session.queue.popleft()
+        # Invalidate the old player's callback before stopping it.
+        session.playback_id = object()
         session.voice_client.stop()
+        self.play_next(guild_id, session, session.playback_id)
         return True
 
     def shuffle_queue(self, guild_id: int) -> bool:
@@ -106,9 +125,8 @@ class AudioEngine:
             )
             return False
 
-        voice_client = session.voice_client
         title = escape_markdown(item.title)
-        if voice_client.is_playing() or voice_client.is_paused() or session.queue:
+        if session.busy or session.queue:
             if len(session.queue) >= 50:
                 await followup(":x: Queue is full (50 items).", ephemeral=True)
                 return False
@@ -160,8 +178,7 @@ class AudioEngine:
             return False
 
         session.queue.extend(added_items)
-        voice_client = session.voice_client
-        if not voice_client.is_playing() and not voice_client.is_paused():
+        if not session.busy:
             first = session.queue.popleft()
             if await self.play_song(guild_id, first):
                 title = escape_markdown(first.title)
@@ -187,52 +204,73 @@ class AudioEngine:
         user_voice_channel: VoiceChannel | StageChannel,
         interaction: Interaction,
     ) -> VoiceClient | None:
-        session = self.sessions.get(guild_id)
-        voice_client = session.voice_client if session else None
-        if voice_client is None or not voice_client.is_connected():
-            try:
-                voice_client = await user_voice_channel.connect(self_deaf=True)
-                self.sessions[guild_id] = PlaybackSession(voice_client)
-            except Exception as error:
+        # Weak values keep locks alive while used or awaited, without retaining guilds.
+        async with self.connection_locks.setdefault(guild_id, Lock()):
+            session = self.sessions.get(guild_id)
+            voice_client = session.voice_client if session else None
+            if voice_client is None or not voice_client.is_connected():
+                try:
+                    voice_client = await user_voice_channel.connect(self_deaf=True)
+                    self.sessions[guild_id] = PlaybackSession(voice_client)
+                except CancelledError:
+                    if registered := user_voice_channel.guild.voice_client:
+                        await registered.disconnect(force=True)
+                    raise
+                except Exception as error:
+                    await interaction.followup.send(
+                        f":x: Failed to connect to the voice channel. Error: {error}",
+                        ephemeral=True,
+                    )
+                    return None
+            elif voice_client.channel and voice_client.channel != user_voice_channel:
                 await interaction.followup.send(
-                    f":x: Failed to connect to the voice channel. Error: {error}",
-                    ephemeral=True,
+                    ":x: I am already playing in another voice channel.", ephemeral=True
                 )
                 return None
-        elif voice_client.channel and voice_client.channel != user_voice_channel:
-            await interaction.followup.send(
-                ":x: I am already playing in another voice channel.", ephemeral=True
-            )
-            return None
+            return voice_client
 
-        return voice_client
-
-    async def play_next_track_and_announce(
-        self, guild_id: int, item: QueueItem
-    ) -> None:
-        if not await self.play_song(guild_id, item):
-            return
-
+    @asynccontextmanager
+    async def request_session(
+        self,
+        guild_id: int,
+        channel: VoiceChannel | StageChannel,
+        interaction: Interaction,
+    ) -> AsyncIterator[PlaybackSession | None]:
+        voice_client = await self.get_or_connect_voice_client(
+            guild_id, channel, interaction
+        )
         session = self.sessions.get(guild_id)
-        if session and session.command_channel:
-            try:
-                title = escape_markdown(item.title)
-                if item.duration == "LIVE":
-                    await session.command_channel.send(
-                        f":radio: Playing **{title}** on Radio Garden",
-                        allowed_mentions=AllowedMentions.none(),
-                    )
-                else:
-                    await session.command_channel.send(
-                        f":notes: Now playing: **{title}** [{item.duration}]",
-                        allowed_mentions=AllowedMentions.none(),
-                    )
-            except Exception as error:
-                logger.warning(
-                    "Failed to send now-playing message in guild %s: %s",
-                    guild_id,
-                    error,
-                )
+        if (
+            voice_client is None
+            or session is None
+            or session.voice_client is not voice_client
+        ):
+            yield None
+            return
+        session.requests += 1
+        try:
+            yield session
+        finally:
+            session.requests -= 1
+            await self._close_if_idle(guild_id, session)
+
+    async def _close_if_idle(self, guild_id: int, session: PlaybackSession) -> None:
+        async with self.connection_locks.setdefault(guild_id, Lock()):
+            if self.sessions.get(guild_id) is session and (
+                not session.voice_client.is_connected()
+                or (not session.busy and not session.queue and not session.requests)
+            ):
+                await self._disconnect_session(guild_id, session)
+
+    def _schedule(self, coroutine) -> None:
+        task = create_task(coroutine)
+        self.tasks.add(task)
+        task.add_done_callback(self._transition_done)
+
+    def _transition_done(self, task: Task) -> None:
+        self.tasks.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error("Audio transition failed", exc_info=error)
 
     async def ensure_user_in_same_voice_channel(
         self, interaction: Interaction, guild_id: int
@@ -271,32 +309,51 @@ class AudioEngine:
 
         return voice_client
 
-    async def play_song(self, guild_id: int, item: QueueItem) -> bool:
-        stream_url = item.stream_url
-        if not stream_url and item.refresh_stream is not None:
-            try:
-                stream_url = await item.refresh_stream(item.source_url)
-            except Exception as error:
-                logger.error("Could not refresh URL for %s: %s", item.title, error)
-                self.play_next(guild_id)
-                return False
-
-        if not stream_url:
-            logger.error("No playable stream URL found for %s", item.title)
-            self.play_next(guild_id)
-            return False
-
-        session = self.sessions.get(guild_id)
-        if session is None or not session.voice_client.is_connected():
-            logger.warning(
-                "Voice client disappeared before playback in guild %s", guild_id
-            )
-            await self.disconnect_and_cleanup(guild_id)
-            return False
-
+    @staticmethod
+    def _reserve(session: PlaybackSession, item: QueueItem) -> object:
         session.current = item
+        session.playback_id = object()
+        return session.playback_id
+
+    def _owns_playback(
+        self, guild_id: int, session: PlaybackSession, playback_id: object | None
+    ) -> bool:
+        return (
+            self.sessions.get(guild_id) is session
+            and session.playback_id is playback_id
+        )
+
+    async def play_song(self, guild_id: int, item: QueueItem) -> bool:
+        session = self.sessions.get(guild_id)
+        if session is None:
+            return False
+        return await self._play_song(
+            guild_id, session, item, self._reserve(session, item)
+        )
+
+    async def _play_song(
+        self,
+        guild_id: int,
+        session: PlaybackSession,
+        item: QueueItem,
+        playback_id: object,
+        *,
+        announce: bool = False,
+    ) -> bool:
+        if not self._owns_playback(guild_id, session, playback_id):
+            return False
         source = None
         try:
+            stream_url = item.stream_url
+            if not stream_url and item.refresh_stream is not None:
+                stream_url = await item.refresh_stream(item.source_url)
+            if not self._owns_playback(guild_id, session, playback_id):
+                return False
+            if not session.voice_client.is_connected():
+                await self.disconnect_and_cleanup(guild_id)
+                return False
+            if not stream_url:
+                raise ValueError(f"No playable stream URL found for {item.title}")
             source = FFmpegOpusAudio(
                 stream_url,
                 before_options=(
@@ -307,53 +364,82 @@ class AudioEngine:
             )
             session.voice_client.play(
                 source,
-                after=lambda error: self.play_next(guild_id, error),
+                after=lambda error: self.bot.loop.call_soon_threadsafe(
+                    self.play_next, guild_id, session, playback_id, error
+                ),
             )
-            return True
+        except CancelledError:
+            self.play_next(guild_id, session, playback_id)
+            raise
         except Exception as error:
             if source is not None:
                 source.cleanup()
-            logger.error("Playback failed to start in guild %s: %s", guild_id, error)
-            self.play_next(guild_id, error)
+            self.play_next(guild_id, session, playback_id, error)
             return False
 
-    async def disconnect_and_cleanup(self, guild_id: int) -> None:
-        if session := self.sessions.pop(guild_id, None):
-            session.queue.clear()
-            session.current = None
-            session.command_channel = None
+        if announce and session.command_channel:
+            title = escape_markdown(item.title)
+            message = (
+                f":radio: Playing **{title}** on Radio Garden"
+                if item.duration == "LIVE"
+                else f":notes: Now playing: **{title}** [{item.duration}]"
+            )
             try:
-                if session.voice_client.is_connected():
-                    await session.voice_client.disconnect()
-                else:
-                    session.voice_client.stop()
-            except Exception as error:
-                logger.error(
-                    "Error during disconnect for guild %s: %s", guild_id, error
+                await session.command_channel.send(
+                    message, allowed_mentions=AllowedMentions.none()
                 )
+            except Exception as error:
+                logger.warning(
+                    "Failed to announce playback in guild %s: %s", guild_id, error
+                )
+        return True
 
-    def play_next(self, guild_id: int, error=None) -> None:
+    async def disconnect_and_cleanup(self, guild_id: int) -> None:
+        session = self.sessions.get(guild_id)
+        if session is not None:
+            async with self.connection_locks.setdefault(guild_id, Lock()):
+                await self._disconnect_session(guild_id, session)
+
+    async def _disconnect_session(
+        self, guild_id: int, session: PlaybackSession
+    ) -> None:
+        if self.sessions.get(guild_id) is not session:
+            return
+        del self.sessions[guild_id]
+        session.queue.clear()
+        session.current = None
+        session.playback_id = None
+        session.command_channel = None
+        try:
+            if session.voice_client.is_connected():
+                await session.voice_client.disconnect()
+            else:
+                session.voice_client.stop()
+        except Exception as error:
+            logger.error("Error during disconnect for guild %s: %s", guild_id, error)
+
+    def play_next(
+        self,
+        guild_id: int,
+        session: PlaybackSession,
+        playback_id: object | None,
+        error: Exception | None = None,
+    ) -> None:
+        # All state changes run on the event loop and belong to this exact playback.
+        if not self._owns_playback(guild_id, session, playback_id):
+            return
         if error:
             logger.error("Player error for guild %s: %s", guild_id, error)
-
-        session = self.sessions.get(guild_id)
-        if session is None:
-            return
-        if not session.voice_client.is_connected():
-            run_coroutine_threadsafe(
-                self.disconnect_and_cleanup(guild_id), self.bot.loop
-            )
-            return
-
-        if session.queue:
-            item = session.queue.popleft()
-            run_coroutine_threadsafe(
-                self.play_next_track_and_announce(guild_id, item), self.bot.loop
-            )
-            return
-
         session.current = None
-        run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
+        session.playback_id = None
+        if session.voice_client.is_connected() and session.queue:
+            item = session.queue.popleft()
+            token = self._reserve(session, item)
+            self._schedule(
+                self._play_song(guild_id, session, item, token, announce=True)
+            )
+        else:
+            self._schedule(self._close_if_idle(guild_id, session))
 
     async def handle_voice_state_update(
         self, member: Member, before: VoiceState, after: VoiceState

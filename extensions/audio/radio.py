@@ -143,36 +143,34 @@ class RadioCog(
             mark_app_command_failed(interaction)
             return
 
-        if (
-            await self.engine.get_or_connect_voice_client(
-                guild_id, user.voice.channel, interaction
-            )
-            is None
-        ):
-            mark_app_command_failed(interaction)
-            return
+        async with self.engine.request_session(
+            guild_id, user.voice.channel, interaction
+        ) as session:
+            if session is None:
+                mark_app_command_failed(interaction)
+                return
 
-        title = escape_markdown(station.title)
+            title = escape_markdown(station.title)
 
-        if await self.engine.enqueue_or_play(
-            guild_id,
-            QueueItem(
-                source_url=self.radio_stream_url(station.channel_id),
-                title=station.title,
-                duration="LIVE",
-                stream_url=stream_url,
-            ),
-            followup=interaction.followup.send,
-            now_playing_message=(
-                f":radio: Now playing: **{title}** using radio source"
-            ),
-            queue_message=(
-                f":ballot_box_with_check: Added to queue: :radio: **{title}** [LIVE]"
-            ),
-        ):
-            self.engine.set_command_channel(guild_id, channel)
-        else:
-            mark_app_command_failed(interaction)
+            if await self.engine.enqueue_or_play(
+                guild_id,
+                QueueItem(
+                    source_url=self.radio_stream_url(station.channel_id),
+                    title=station.title,
+                    duration="LIVE",
+                    stream_url=stream_url,
+                ),
+                followup=interaction.followup.send,
+                now_playing_message=(
+                    f":radio: Now playing: **{title}** using radio source"
+                ),
+                queue_message=(
+                    f":ballot_box_with_check: Added to queue: :radio: **{title}** [LIVE]"
+                ),
+            ):
+                self.engine.set_command_channel(guild_id, session, channel)
+            else:
+                mark_app_command_failed(interaction)
 
     async def resolve_radio_station(self, query: str | None) -> RadioStation:
         if query is None:

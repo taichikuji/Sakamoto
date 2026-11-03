@@ -102,11 +102,23 @@ class DummyVoiceClient:
         self._playing = playing
         self._paused = paused
         self.channel = channel
-        self.play = MagicMock()
+        self.play = MagicMock(side_effect=self._play)
         self.pause = MagicMock()
         self.resume = MagicMock()
-        self.stop = MagicMock()
-        self.disconnect = AsyncMock()
+        self.stop = MagicMock(side_effect=self._stop)
+        self.disconnect = AsyncMock(side_effect=self._disconnect)
+
+    def _play(self, _source, *, after):
+        if self._playing:
+            raise RuntimeError("Already playing audio")
+        self._playing = True
+
+    def _stop(self):
+        self._playing = self._paused = False
+
+    async def _disconnect(self):
+        self._stop()
+        self._connected = False
 
     def is_connected(self):
         return self._connected
@@ -240,7 +252,8 @@ def test_audio_engine_sessions_are_isolated_by_guild():
     assert engine.queue_snapshot(2) == (None, tuple(second.queue))
 
 
-def test_queue_operations_validate_skip_and_shuffle(monkeypatch):
+@pytest.mark.asyncio
+async def test_queue_operations_validate_skip_and_shuffle(monkeypatch):
     engine = AudioEngine(_make_bot())
     voice_client = DummyVoiceClient(playing=True)
     _add_session(
@@ -256,8 +269,9 @@ def test_queue_operations_validate_skip_and_shuffle(monkeypatch):
     assert engine.shuffle_queue(1) is True
     assert [item.title for item in engine.queue_snapshot(1)[1]] == ["Second", "First"]
     assert engine.skip_tracks(1, 2) is True
-    assert engine.queued_count(1) == 1
+    assert engine.queued_count(1) == 0
     voice_client.stop.assert_called_once()
+    await asyncio.gather(*engine.tasks)
 
 
 @pytest.mark.asyncio
@@ -293,7 +307,7 @@ async def test_play_song_returns_false_when_refreshed_stream_url_missing(monkeyp
     )
 
     assert started is False
-    cog.play_next.assert_called_once_with(1)
+    assert cog.play_next.call_args.args[0] == 1
 
 
 @pytest.mark.asyncio
@@ -394,18 +408,10 @@ async def test_control_commands_return_early_when_same_channel_check_fails(comma
     )
 
 
-def test_play_next_returns_without_voice_client(monkeypatch):
-    cog = AudioEngine(_make_bot())
-    schedule = MagicMock(side_effect=lambda coro, _loop: coro.close())
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe",
-        schedule,
-    )
-
-    cog.play_next(123)
-
-    schedule.assert_not_called()
-    assert cog.sessions == {}
+def test_play_next_ignores_a_removed_session():
+    engine = AudioEngine(_make_bot())
+    engine.play_next(1, PlaybackSession(DummyVoiceClient()), object())
+    assert engine.sessions == {}
 
 
 @pytest.mark.asyncio
@@ -1304,7 +1310,9 @@ async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch
     assert item.source_url == "https://youtube.test/watch?v=abc"
     assert item.stream_url is None
 
-    await cog.play_next_track_and_announce(1, item)
+    await cog._play_song(
+        1, cog.sessions[1], item, cog._reserve(cog.sessions[1], item), announce=True
+    )
 
     refresh_stream.assert_awaited_once_with("https://youtube.test/watch?v=abc")
     assert vc.play.call_args.args[0] == "audio:https://stream.test/fresh"
@@ -1493,47 +1501,28 @@ async def test_disconnect_and_cleanup_stops_disconnected_player():
 
 @pytest.mark.asyncio
 async def test_play_next_pulls_from_queue(monkeypatch):
-    cog = AudioEngine(_make_bot())
-    item = QueueItem("url", "title", "3:00")
-    _add_session(cog, DummyVoiceClient(connected=True), queue=[item])
-    cog.play_next_track_and_announce = AsyncMock()
-    scheduled = []
-
-    def fake_run(coro, _loop):
-        scheduled.append(coro)
-
+    engine = AudioEngine(_make_bot())
+    item = QueueItem("url", "title", "3:00", "stream")
+    session = _add_session(engine, DummyVoiceClient(), queue=[item])
     monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
+        lambda *_args, **_kwargs: object(),
     )
-    cog.play_next(1)
-    await scheduled[0]
-
-    cog.play_next_track_and_announce.assert_awaited_once_with(1, item)
-    assert cog.queue_snapshot(1)[1] == ()
+    engine.play_next(1, session, session.playback_id)
+    assert session.current is item
+    assert not session.queue
+    await asyncio.gather(*engine.tasks)
 
 
 @pytest.mark.asyncio
-async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
-    cog = AudioEngine(_make_bot())
-    _add_session(
-        cog,
-        DummyVoiceClient(connected=False),
-        queue=[QueueItem("u", "t", "d")],
-        current=QueueItem("u", "t", "d"),
-        command_channel=object(),
+async def test_play_next_cleans_state_when_voice_disconnected():
+    engine = AudioEngine(_make_bot())
+    session = _add_session(
+        engine, DummyVoiceClient(connected=False), queue=[QueueItem("u", "t", "d")]
     )
-    scheduled = []
-
-    def fake_run(coro, _loop):
-        scheduled.append(coro)
-
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
-    )
-    cog.play_next(1)
-    await scheduled[0]
-
-    assert cog.sessions == {}
+    engine.play_next(1, session, session.playback_id)
+    await asyncio.gather(*engine.tasks)
+    assert engine.sessions == {}
 
 
 def test_search_source_retains_only_playback_metadata(monkeypatch):
@@ -1583,3 +1572,184 @@ async def test_unload_cancels_expiry_and_prevents_cache_refill(monkeypatch):
     await cog.resolve_source("queued track")
     assert cog.source_cache == {}
     assert cog.cache_expiry is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace_session", [False, True])
+async def test_old_audio_callback_cannot_stop_new_playback(
+    monkeypatch, replace_session
+):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    engine = AudioEngine(bot)
+    voice = DummyVoiceClient()
+    _add_session(engine, voice)
+    monkeypatch.setattr(
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
+        lambda *_args, **_kwargs: object(),
+    )
+    assert await engine.play_song(1, QueueItem("old", "Old", "1:00", "old-stream"))
+    old_callback = voice.play.call_args.kwargs["after"]
+    if replace_session:
+        await engine.disconnect_and_cleanup(1)
+        voice = DummyVoiceClient()
+        _add_session(engine, voice)
+    else:
+        assert engine.skip_tracks(1, 1)
+    assert await engine.play_song(1, QueueItem("new", "New", "1:00", "new-stream"))
+    await asyncio.to_thread(old_callback, None)
+    await asyncio.sleep(0)
+    await asyncio.gather(*engine.tasks)
+    assert engine.sessions[1].current.title == "New"
+    assert voice.is_playing()
+    voice.disconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace_session", [False, True])
+async def test_pending_start_cannot_overwrite_new_playback(
+    monkeypatch, replace_session
+):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    engine = AudioEngine(bot)
+    voice = DummyVoiceClient()
+    session = _add_session(engine, voice)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh(_url):
+        started.set()
+        await release.wait()
+        return "old-stream"
+
+    monkeypatch.setattr(
+        "extensions.audio._audio_engine.FFmpegOpusAudio",
+        lambda *_args, **_kwargs: object(),
+    )
+    old = QueueItem("old", "Old", "1:00", refresh_stream=refresh)
+    pending = asyncio.create_task(engine.enqueue_playlist(1, [old], AsyncMock()))
+    await started.wait()
+    new = QueueItem("new", "New", "1:00", "new-stream")
+    if replace_session:
+        await engine.disconnect_and_cleanup(1)
+        voice = DummyVoiceClient()
+        session = _add_session(engine, voice)
+    assert await engine.enqueue_or_play(1, new, AsyncMock())
+    if not replace_session:
+        assert session.current is old
+        assert tuple(session.queue) == (new,)
+        assert engine.skip_tracks(1, 1)
+        await asyncio.gather(*engine.tasks)
+    release.set()
+    assert await pending is False
+    assert session.current is new
+    assert voice.is_playing()
+
+
+@pytest.mark.asyncio
+async def test_voice_connection_requests_share_one_pending_connect():
+    engine = AudioEngine(_make_bot())
+    started, release = asyncio.Event(), asyncio.Event()
+    voice = DummyVoiceClient()
+
+    async def connect(**_kwargs):
+        started.set()
+        await release.wait()
+        return voice
+
+    channel = SimpleNamespace(connect=AsyncMock(side_effect=connect))
+    voice.channel = channel
+    interaction = _make_interaction(user=object())
+    first = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, interaction)
+    )
+    await started.wait()
+    second = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, interaction)
+    )
+    await asyncio.sleep(0)
+    release.set()
+    assert await asyncio.gather(first, second) == [voice, voice]
+    channel.connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_request_does_not_disconnect_another_pending_request():
+    engine = AudioEngine(_make_bot())
+    voice = DummyVoiceClient()
+    channel = SimpleNamespace(connect=AsyncMock(return_value=voice))
+    voice.channel = channel
+    interaction = _make_interaction(user=object())
+    async with engine.request_session(1, channel, interaction) as first:
+        async with engine.request_session(1, channel, interaction) as second:
+            assert first is second
+            assert first.requests == 2
+        assert first.requests == 1
+        voice.disconnect.assert_not_awaited()
+    voice.disconnect.assert_awaited_once()
+    assert not engine.sessions
+
+
+@pytest.mark.asyncio
+async def test_reconnect_waits_for_discord_disconnect_to_finish():
+    engine = AudioEngine(_make_bot())
+    old = DummyVoiceClient()
+    _add_session(engine, old)
+    started, release = asyncio.Event(), asyncio.Event()
+    registered = [old]
+    new = DummyVoiceClient()
+
+    async def disconnect():
+        started.set()
+        await release.wait()
+        registered.clear()
+        old._connected = False
+
+    async def connect(**_kwargs):
+        assert not registered, "Discord still registers the previous voice client"
+        registered.append(new)
+        return new
+
+    old.disconnect.side_effect = disconnect
+    channel = SimpleNamespace(connect=AsyncMock(side_effect=connect))
+    new.channel = channel
+    closing = asyncio.create_task(engine.disconnect_and_cleanup(1))
+    await started.wait()
+    connecting = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, _make_interaction(user=object()))
+    )
+    await asyncio.sleep(0)
+    channel.connect.assert_not_awaited()
+    release.set()
+    await closing
+    assert await connecting is new
+    assert engine.sessions[1].voice_client is new
+
+
+@pytest.mark.asyncio
+async def test_cancelled_connection_removes_discord_registration():
+    engine = AudioEngine(_make_bot())
+    registered = DummyVoiceClient()
+    guild = SimpleNamespace(voice_client=registered)
+    started = asyncio.Event()
+
+    async def connect(**_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    async def disconnect(*, force):
+        assert force is True
+        guild.voice_client = None
+
+    registered.disconnect.side_effect = disconnect
+    channel = SimpleNamespace(connect=AsyncMock(side_effect=connect), guild=guild)
+    pending = asyncio.create_task(
+        engine.get_or_connect_voice_client(1, channel, _make_interaction(user=object()))
+    )
+    await started.wait()
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert guild.voice_client is None
+    registered.disconnect.assert_awaited_once_with(force=True)
+    assert not engine.sessions

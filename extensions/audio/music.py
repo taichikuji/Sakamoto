@@ -1,5 +1,5 @@
 import logging
-from asyncio import Future, TimerHandle, gather, get_running_loop
+from asyncio import Future, TimerHandle, create_task, gather, get_running_loop
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -179,62 +179,47 @@ class MusicCog(commands.Cog):
             mark_app_command_failed(interaction)
             return
 
-        was_connected = self.engine.is_connected(guild_id)
-        # Connecting to Discord and resolving a YouTube stream are independent network waits.
-        # Start both now so a new request only waits for the slower one.
-        voice_client, info = await gather(
-            self.engine.get_or_connect_voice_client(
-                guild_id, user.voice.channel, interaction
-            ),
-            self.resolve_source(query),
-            return_exceptions=True,
-        )
-        if voice_client is None:
-            mark_app_command_failed(interaction)
-            return
-
+        # Resolve media while connecting; the session lease owns idle cleanup.
+        lookup = create_task(self.resolve_source(query))
         try:
-            # Delay source errors until here so the normal cleanup below can disconnect
-            # a voice client that was created while the lookup was running.
-            if isinstance(voice_client, Exception):
-                raise voice_client
-            if isinstance(info, Exception):
-                raise info
-
-            if self._is_url(query) and info.get("_type") in ["playlist", "multi_video"]:
-                entries = list(info.get("entries") or [])
-                if not entries:
-                    raise ValueError("The playlist is empty or private.")
-
-                if await self.engine.enqueue_playlist(
-                    guild_id=guild_id,
-                    items=self.playlist_items(entries),
-                    followup=interaction.followup.send,
+            async with self.engine.request_session(
+                guild_id, user.voice.channel, interaction
+            ) as session:
+                if session is None:
+                    mark_app_command_failed(interaction)
+                    return
+                info = await lookup
+                if self.engine.sessions.get(guild_id) is not session:
+                    raise ValueError("Playback session ended while resolving audio")
+                if self._is_url(query) and info.get("_type") in (
+                    "playlist",
+                    "multi_video",
                 ):
+                    entries = self.playlist_items(list(info.get("entries") or []))
+                    added = await self.engine.enqueue_playlist(
+                        guild_id, entries, followup=interaction.followup.send
+                    )
+                else:
+                    added = await self.engine.enqueue_or_play(
+                        guild_id,
+                        self.queue_item(self._first_track(info), requested_url=query),
+                        followup=interaction.followup.send,
+                    )
+                if added:
                     self.engine.set_command_channel(
-                        guild_id, cast(Messageable, channel)
+                        guild_id, session, cast(Messageable, channel)
                     )
                 else:
                     mark_app_command_failed(interaction)
-                return
-
-            if await self.engine.enqueue_or_play(
-                guild_id,
-                self.queue_item(self._first_track(info), requested_url=query),
-                followup=interaction.followup.send,
-            ):
-                self.engine.set_command_channel(guild_id, cast(Messageable, channel))
-            else:
-                mark_app_command_failed(interaction)
-
         except Exception:
             logger.exception("Failed to retrieve audio in guild %s", guild_id)
-            if not was_connected:
-                await self.engine.disconnect_and_cleanup(guild_id)
             await interaction.followup.send(
                 ":x: Failed to retrieve audio.", ephemeral=True
             )
             mark_app_command_failed(interaction)
+        finally:
+            # Observe lookup failures even when voice connection was rejected.
+            await gather(lookup, return_exceptions=True)
 
     def search_source(self, query: str) -> dict:
         """Resolve one complete result, or a flat playlist."""
@@ -504,7 +489,11 @@ class MusicCog(commands.Cog):
             mark_app_command_failed(interaction)
             return
 
-        if not voice_client.is_playing() and not voice_client.is_paused():
+        if (
+            not self.engine.queue_snapshot(guild_id)[0]
+            and not voice_client.is_playing()
+            and not voice_client.is_paused()
+        ):
             await interaction.response.send_message(
                 ":x: Nothing is currently playing.", ephemeral=True
             )
