@@ -1,6 +1,6 @@
 import logging
 from os import environ, makedirs, path
-from re import IGNORECASE, fullmatch, match
+from re import IGNORECASE, fullmatch, prefixmatch
 from typing import TYPE_CHECKING
 
 from aiohttp import ClientError, ContentTypeError
@@ -119,7 +119,7 @@ class SteamCog(
         vanity_name = vanity_url_or_id
 
         # regex to extract vanity name from Steam URL
-        if profile_match := match(
+        if profile_match := prefixmatch(
             r"(?:https?://)?steamcommunity\.com/(?:id/([^/]+)|profiles/(\d{17}))/?",
             vanity_url_or_id,
             IGNORECASE,

@@ -100,3 +100,42 @@ async def test_close_closes_shared_session_before_base_bot(monkeypatch, main_mod
 
     session.close.assert_awaited_once()
     base_close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("steam_configured", [False, True])
+async def test_all_extensions_load_and_reload_with_stable_commands(
+    monkeypatch, main_module, tmp_path, steam_configured
+):
+    if steam_configured:
+        monkeypatch.setenv("STEAM_TOKEN", "unit-test-token")
+    else:
+        monkeypatch.delenv("STEAM_TOKEN", raising=False)
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    bot = main_module.Sakamoto()
+    bot.db_path = str(tmp_path / "sakamoto.sqlite")
+    expected = {
+        ".".join(path.with_suffix("").parts)
+        for path in Path("extensions").rglob("*.py")
+        if not path.name.startswith("_")
+    }
+    if not steam_configured:
+        expected.remove("extensions.integrations.steam")
+
+    async with bot:
+        await bot.setup_hook()
+        assert set(bot.extensions) == expected
+        commands = {
+            command.name: command.to_dict(bot.tree)
+            for command in bot.tree.get_commands()
+        }
+        for extension in sorted(expected):
+            await bot.reload_extension(extension)
+        assert set(bot.extensions) == expected
+        assert {
+            command.name: command.to_dict(bot.tree)
+            for command in bot.tree.get_commands()
+        } == commands
+
+    assert bot.session.closed
+    assert not bot.extensions

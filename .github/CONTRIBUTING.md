@@ -4,8 +4,10 @@ Be respectful and constructive. Report bugs and propose features through the pro
 
 ## Setup
 
+Install Python 3.15.2 and Pipenv, then install the locked dependencies:
+
 ```bash
-pipenv install --dev
+pipenv sync --dev
 export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 pipenv run python main.py
 ```
@@ -23,6 +25,7 @@ Run the code-quality checks with:
 ```bash
 pipenv run ruff check .
 pipenv run ruff format --check .
+pipenv run pytest -q
 ```
 
 ## Pull requests

@@ -17,7 +17,7 @@ from discord.abc import Messageable
 from discord.ext import commands
 from discord.ui import Button, View, button
 from discord.utils import escape_markdown
-from yt_dlp import YoutubeDL
+lazy from yt_dlp import YoutubeDL
 
 from extensions.core.analytics import mark_app_command_failed
 

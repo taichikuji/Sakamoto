@@ -38,21 +38,23 @@ function update_script() {
   $STD apt-get upgrade -y
   msg_ok "Base system updated"
 
-  msg_info "Installing Python 3.14"
+  msg_info "Installing Python 3.15.2"
   $STD apt-get install -y curl
   if ! command -v uv >/dev/null 2>&1; then
     bash -o pipefail -c 'curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL=/usr/local/bin sh'
   fi
-  $STD uv python install 3.14
-  msg_ok "Python 3.14 installed"
+  $STD uv python install 3.15.2
+  msg_ok "Python 3.15.2 installed"
 
   msg_info "Updating Sakamoto"
   cd /opt/Sakamoto
   $STD git pull --ff-only
-  if pipenv --venv >/dev/null 2>&1 && ! pipenv run python -c 'import sys; assert sys.version_info[:2] == (3, 14)'; then
+  if pipenv --venv >/dev/null 2>&1 && ! pipenv run python -c 'import sys; assert sys.version_info[:3] == (3, 15, 2)'; then
+    # Stop the bot before replacing its interpreter and installed modules.
+    systemctl stop Sakamoto
     $STD pipenv --rm
   fi
-  $STD pipenv --python "$(uv python find --managed-python 3.14)" install --deploy
+  $STD pipenv --python "$(uv python find --managed-python 3.15.2)" install --deploy
   msg_ok "Sakamoto updated"
 
   msg_info "Restarting Sakamoto service"
@@ -83,11 +85,11 @@ $STD lxc-attach -n "$CTID" -- bash -c "\
     build-essential"
 msg_ok "Sakamoto dependencies installed"
 
-msg_info "Installing Python 3.14"
+msg_info "Installing Python 3.15.2"
 $STD lxc-attach -n "$CTID" -- bash -o pipefail -c "\
   curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL=/usr/local/bin sh && \
-  uv python install 3.14"
-msg_ok "Python 3.14 installed"
+  uv python install 3.15.2"
+msg_ok "Python 3.15.2 installed"
 
 msg_info "Cloning Sakamoto repository"
 $STD lxc-attach -n "$CTID" -- bash -c "\
@@ -96,7 +98,7 @@ msg_ok "Sakamoto repository cloned"
 
 msg_info "Installing Python packages"
 $STD lxc-attach -n "$CTID" -- bash -c "\
-  cd /opt/Sakamoto && pipenv --python \"\$(uv python find --managed-python 3.14)\" install --deploy"
+  cd /opt/Sakamoto && pipenv --python \"\$(uv python find --managed-python 3.15.2)\" install --deploy"
 msg_ok "Python packages installed"
 
 msg_info "Setting up Sakamoto service"

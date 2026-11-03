@@ -45,11 +45,18 @@ Prebuilt images are available as `ghcr.io/taichikuji/sakamoto:latest`; they can 
 
 ## Develop
 
+Requires [Python 3.15.2](https://www.python.org/downloads/release/python-3152/) and Pipenv.
+
 ```bash
-pipenv install --dev
+pipenv sync --dev
 export TOKEN='YOUR_DISCORD_BOT_TOKEN'
 pipenv run python main.py
 ```
+
+When upgrading from Python 3.14, recreate the old virtual environment first
+(`pipenv remove` in current Pipenv), then sync the locked packages above. Keep
+the existing `data/` directory or Docker volume; no database migration is needed.
+Docker builds and the Proxmox installer also use Python 3.15.2.
 
 See the [contribution guide](.github/CONTRIBUTING.md), [domain context](CONTEXT.md), and [wiki](https://github.com/taichikuji/Sakamoto/wiki/).
 

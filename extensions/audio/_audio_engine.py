@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-StreamResolver = Callable[[str], Awaitable[str | None]]
+type StreamResolver = Callable[[str], Awaitable[str | None]]
 
 
 @dataclass

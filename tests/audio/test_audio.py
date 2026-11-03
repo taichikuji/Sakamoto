@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import sys
 from collections import deque
 from pathlib import Path
@@ -47,6 +48,29 @@ def test_play_option_contracts():
     ] == [
         ("query", True, True),
     ]
+
+
+def test_music_defers_ytdlp_import_until_first_worker_lookup():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+from extensions.audio import music
+
+assert 'yt_dlp' not in sys.modules
+with ThreadPoolExecutor(max_workers=2) as pool:
+    clients = list(pool.map(lambda _: music.YoutubeDL, range(2)))
+assert clients[0] is clients[1] is sys.modules['yt_dlp'].YoutubeDL
+""",
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+        timeout=30,
+    )
 
 
 @pytest.mark.asyncio

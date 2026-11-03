@@ -9,7 +9,7 @@ from extensions.general.info import InfoCog
 
 def test_create_embed_contains_stable_project_info_and_uptime(monkeypatch):
     monkeypatch.setattr("extensions.general.info.time.monotonic", lambda: 3_661)
-    monkeypatch.setattr("extensions.general.info.python_version", lambda: "3.14.5")
+    monkeypatch.setattr("extensions.general.info.python_version", lambda: "3.15.2")
     monkeypatch.setattr("extensions.general.info.system", lambda: "Linux")
     monkeypatch.setattr("extensions.general.info.machine", lambda: "x86_64")
     cog = InfoCog(SimpleNamespace(color=0xFF3351, started_at=0, guilds=[1] * 5))
@@ -20,7 +20,7 @@ def test_create_embed_contains_stable_project_info_and_uptime(monkeypatch):
     assert embed.description == "Here's some information about me and my dependencies!"
     assert embed.color.value == 0xFF3351
     assert [(field.name, field.value, field.inline) for field in embed.fields] == [
-        ("Runtime", "**Python**: 3.14.5", True),
+        ("Runtime", "**Python**: 3.15.2", True),
         ("OS", "**Linux**: x86_64", True),
         ("Uptime", "1h 1m", True),
         ("Project", "[GitHub](https://github.com/taichikuji/Sakamoto)", True),
