@@ -21,7 +21,7 @@ from extensions.audio._audio_engine import (
     ResolvedStream,
     get_audio_engine,
 )
-from extensions.audio.music import MusicCog, MusicControls
+from extensions.audio.music import MusicCog, MusicControls, SourceLookupError
 from extensions.audio.radio import RadioCog, RadioStation
 
 
@@ -139,15 +139,26 @@ class DummyLoop:
     def __init__(self, result):
         self.result = result
 
-    async def run_in_executor(self, _executor, _fn, _arg):
-        return self.result
+    def run_in_executor(self, _executor, _fn, _arg):
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        loop.call_soon(future.set_result, self.result)
+        return future
 
 
 class ImmediateLoop:
     call_later = staticmethod(DummyLoop.call_later)
 
-    async def run_in_executor(self, _executor, function, argument):
-        return function(argument)
+    def run_in_executor(self, _executor, function, argument):
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        try:
+            result = function(argument)
+        except Exception as error:
+            loop.call_soon(future.set_exception, error)
+        else:
+            loop.call_soon(future.set_result, result)
+        return future
 
 
 class DummyResponse:
@@ -779,7 +790,8 @@ async def test_play_connects_before_enqueue(monkeypatch):
     monkeypatch.setattr(
         "extensions.audio.music.get_running_loop",
         lambda: SimpleNamespace(
-            run_in_executor=lookup, call_later=asyncio.get_running_loop().call_later
+            run_in_executor=lambda *args: asyncio.create_task(lookup(*args)),
+            call_later=asyncio.get_running_loop().call_later,
         ),
     )
 
@@ -853,7 +865,8 @@ async def test_play_resolves_source_while_connecting_to_voice(monkeypatch):
     monkeypatch.setattr(
         "extensions.audio.music.get_running_loop",
         lambda: SimpleNamespace(
-            run_in_executor=lookup, call_later=asyncio.get_running_loop().call_later
+            run_in_executor=lambda *args: asyncio.create_task(lookup(*args)),
+            call_later=asyncio.get_running_loop().call_later,
         ),
     )
 
@@ -1740,6 +1753,81 @@ async def test_selected_codec_survives_resolution_and_refresh(monkeypatch, codec
     assert await cog.engine.play_song(1, item)
     assert constructor.call_args.args == ("fresh",)
     assert constructor.call_args.kwargs["codec"] == codec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_first", [False, True])
+async def test_shared_lookup_survives_one_cancelled_waiter(monkeypatch, cancel_first):
+    loop = asyncio.get_running_loop()
+    worker = loop.create_future()
+    cog = MusicCog(_make_bot())
+    monkeypatch.setattr(
+        "extensions.audio.music.get_running_loop",
+        lambda: SimpleNamespace(
+            run_in_executor=lambda *_args: worker,
+            call_later=loop.call_later,
+        ),
+    )
+    first = asyncio.create_task(cog.resolve_source("track"))
+    second = asyncio.create_task(cog.resolve_source("track"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    cancelled, remaining = (first, second) if cancel_first else (second, first)
+    cancelled.cancel()
+    await asyncio.gather(cancelled, return_exceptions=True)
+    assert not worker.cancelled()
+    assert len(cog.source_lookups) == 1
+    worker.set_result({"url": "stream"})
+    assert await remaining == {"url": "stream"}
+    assert not cog.source_lookups
+    cog.cog_unload()
+
+
+@pytest.mark.asyncio
+async def test_timed_out_lookup_keeps_capacity_until_worker_finishes_even_after_reload(
+    monkeypatch,
+):
+    loop = asyncio.get_running_loop()
+    worker = loop.create_future()
+    bot = _make_bot()
+    cog = MusicCog(bot)
+    monkeypatch.setattr("extensions.audio.music.SOURCE_LOOKUP_TIMEOUT", 0.01)
+    monkeypatch.setattr("extensions.audio.music.MAX_SOURCE_LOOKUPS", 1)
+    monkeypatch.setattr(
+        "extensions.audio.music.get_running_loop",
+        lambda: SimpleNamespace(
+            run_in_executor=lambda *_args: worker,
+            call_later=loop.call_later,
+        ),
+    )
+    with pytest.raises(SourceLookupError, match="timed out"):
+        await cog.resolve_source("slow")
+    cog.cog_unload()
+    reloaded = MusicCog(bot)
+    with pytest.raises(SourceLookupError, match="busy"):
+        await reloaded.resolve_source("another")
+    assert not worker.cancelled()
+    worker.set_result({"url": "stream"})
+    await asyncio.gather(*cog.source_lookups.values())
+    await asyncio.sleep(0)
+    assert not reloaded.source_lookups
+    assert cog.source_cache == {}
+
+
+@pytest.mark.asyncio
+async def test_full_queue_rejects_before_source_lookup(monkeypatch):
+    voice_channel = DummyVoiceChannel()
+    cog = MusicCog(_make_bot())
+    voice = DummyVoiceClient(channel=voice_channel, playing=True)
+    _add_session(cog.engine, voice, queue=[QueueItem("u", "t", "d")] * 50)
+    cog.resolve_source = AsyncMock()
+    monkeypatch.setattr("extensions.audio.music.Member", DummyMember)
+    interaction = _make_interaction(user=DummyMember(42, voice_channel=voice_channel))
+    await MusicCog.play.callback(cog, interaction, "track")
+    cog.resolve_source.assert_not_awaited()
+    interaction.response.send_message.assert_awaited_once_with(
+        ":x: Queue is full (50 items).", ephemeral=True
+    )
 
 
 @pytest.mark.asyncio

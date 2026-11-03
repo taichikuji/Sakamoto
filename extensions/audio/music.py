@@ -1,5 +1,13 @@
 import logging
-from asyncio import Future, TimerHandle, create_task, gather, get_running_loop
+from asyncio import (
+    Future,
+    TimerHandle,
+    create_task,
+    gather,
+    get_running_loop,
+    shield,
+    wait_for,
+)
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -27,6 +35,13 @@ if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
+
+MAX_SOURCE_LOOKUPS = 4
+SOURCE_LOOKUP_TIMEOUT = 30
+
+
+class SourceLookupError(Exception):
+    """An extraction request exceeded its capacity or waiting budget."""
 
 
 class MusicControls(View):
@@ -108,7 +123,10 @@ class MusicCog(commands.Cog):
         self.bot = bot
         self.engine = get_audio_engine(bot)
         self.source_cache: dict[str, tuple[float, dict]] = {}
-        self.source_lookups: dict[str, Future[dict]] = {}
+        # Keep the capacity bound across cog reloads while executor work finishes.
+        if not hasattr(bot, "_music_lookups"):
+            bot._music_lookups = {}
+        self.source_lookups: dict[str, Future[dict]] = bot._music_lookups
         self.cache_expiry: TimerHandle | None = None
         self.cache_enabled = True
 
@@ -131,6 +149,7 @@ class MusicCog(commands.Cog):
             async with session.get(
                 "https://suggestqueries.google.com/complete/search",
                 params={"client": "firefox", "ds": "yt", "q": query},
+                timeout=2,
             ) as r:
                 return [
                     app_commands.Choice(name=s[:100], value=s[:100])
@@ -167,6 +186,11 @@ class MusicCog(commands.Cog):
                 ":x: You need to be in a voice channel to use this command.",
                 ephemeral=True,
             )
+            mark_app_command_failed(interaction)
+            return
+
+        if error := self.engine.request_error(guild_id, user.voice.channel):
+            await interaction.response.send_message(error, ephemeral=True)
             mark_app_command_failed(interaction)
             return
 
@@ -211,6 +235,9 @@ class MusicCog(commands.Cog):
                     )
                 else:
                     mark_app_command_failed(interaction)
+        except SourceLookupError as error:
+            await interaction.followup.send(f":x: {error}", ephemeral=True)
+            mark_app_command_failed(interaction)
         except Exception:
             logger.exception("Failed to retrieve audio in guild %s", guild_id)
             await interaction.followup.send(
@@ -218,7 +245,7 @@ class MusicCog(commands.Cog):
             )
             mark_app_command_failed(interaction)
         finally:
-            # Observe lookup failures even when voice connection was rejected.
+            lookup.cancel()
             await gather(lookup, return_exceptions=True)
 
     def search_source(self, query: str) -> dict:
@@ -234,6 +261,8 @@ class MusicCog(commands.Cog):
             "extract_flat": "in_playlist" if is_url else False,
             "noplaylist": not is_url,
             "playlistend": 50,
+            "socket_timeout": 10,
+            "extractor_retries": 1,
         }
         with YoutubeDL(cast(Any, options)) as youtube_dl_client:
             info = cast(
@@ -277,15 +306,22 @@ class MusicCog(commands.Cog):
         if (cached := self.source_cache.get(key)) and cached[0] > time():
             return cached[1]
 
-        if lookup := self.source_lookups.get(key):
-            return await lookup
-
-        lookup = get_running_loop().run_in_executor(None, self.search_source, query)
-        self.source_lookups[key] = lookup
+        lookup = self.source_lookups.get(key)
+        if lookup is None:
+            if (
+                sum(not future.done() for future in self.source_lookups.values())
+                >= MAX_SOURCE_LOOKUPS
+            ):
+                raise SourceLookupError("Music lookup is busy. Try again shortly.")
+            lookup = get_running_loop().run_in_executor(None, self.search_source, query)
+            self.source_lookups[key] = lookup
+            lookup.add_done_callback(lambda task: self._lookup_done(key, task))
         try:
-            info = await lookup
-        finally:
-            self.source_lookups.pop(key, None)
+            info = await wait_for(shield(lookup), timeout=SOURCE_LOOKUP_TIMEOUT)
+        except TimeoutError as error:
+            raise SourceLookupError(
+                "Music lookup timed out. Try again shortly."
+            ) from error
         is_playlist = is_url and info.get("_type") in [
             "playlist",
             "multi_video",
@@ -302,6 +338,13 @@ class MusicCog(commands.Cog):
                     self.source_cache[source_url] = (expires_at, track_info)
             self._expire_sources()
         return info
+
+    def _lookup_done(self, key: str, future: Future) -> None:
+        if self.source_lookups.get(key) is future:
+            self.source_lookups.pop(key)
+        # Observe errors even after all waiters time out. Running workers retain a slot.
+        if not future.cancelled():
+            future.exception()
 
     def _expire_sources(self) -> None:
         if self.cache_expiry is not None:

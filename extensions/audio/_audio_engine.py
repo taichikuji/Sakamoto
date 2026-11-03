@@ -77,6 +77,18 @@ class AudioEngine:
         session = self.sessions.get(guild_id)
         return bool(session and session.voice_client.is_connected())
 
+    def request_error(
+        self, guild_id: int, channel: VoiceChannel | StageChannel
+    ) -> str | None:
+        session = self.sessions.get(guild_id)
+        if session is not None:
+            voice = session.voice_client
+            if voice.is_connected() and voice.channel and voice.channel != channel:
+                return ":x: I am already playing in another voice channel."
+            if len(session.queue) >= 50:
+                return ":x: Queue is full (50 items)."
+        return None
+
     def set_command_channel(
         self, guild_id: int, session: PlaybackSession, channel: Messageable
     ) -> None:
@@ -212,6 +224,9 @@ class AudioEngine:
     ) -> VoiceClient | None:
         # Weak values keep locks alive while used or awaited, without retaining guilds.
         async with self.connection_locks.setdefault(guild_id, Lock()):
+            if error := self.request_error(guild_id, user_voice_channel):
+                await interaction.followup.send(error, ephemeral=True)
+                return None
             session = self.sessions.get(guild_id)
             voice_client = session.voice_client if session else None
             if voice_client is None or not voice_client.is_connected():
@@ -228,11 +243,6 @@ class AudioEngine:
                         ephemeral=True,
                     )
                     return None
-            elif voice_client.channel and voice_client.channel != user_voice_channel:
-                await interaction.followup.send(
-                    ":x: I am already playing in another voice channel.", ephemeral=True
-                )
-                return None
             return voice_client
 
     @asynccontextmanager

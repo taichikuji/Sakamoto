@@ -119,6 +119,11 @@ class RadioCog(
             mark_app_command_failed(interaction)
             return
 
+        if error := self.engine.request_error(guild_id, user.voice.channel):
+            await interaction.response.send_message(error, ephemeral=True)
+            mark_app_command_failed(interaction)
+            return
+
         await interaction.response.defer()
         channel = interaction.channel
         if channel is None or not hasattr(channel, "send"):
