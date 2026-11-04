@@ -1543,7 +1543,9 @@ def test_search_source_retains_only_playback_metadata(monkeypatch):
     }
     ydl = MagicMock()
     ydl.__enter__.return_value.extract_info.return_value = raw
-    monkeypatch.setattr("extensions.audio.music._youtube_dl", MagicMock(return_value=ydl))
+    monkeypatch.setattr(
+        "extensions.audio.music._youtube_dl", MagicMock(return_value=ydl)
+    )
 
     assert MusicCog(_make_bot()).search_source("track") == {"entries": [track]}
 
