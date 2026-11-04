@@ -17,7 +17,6 @@ from discord.abc import Messageable
 from discord.ext import commands
 from discord.ui import Button, View, button
 from discord.utils import escape_markdown
-from yt_dlp import YoutubeDL
 
 from extensions.core.analytics import mark_app_command_failed
 
@@ -27,6 +26,13 @@ if TYPE_CHECKING:
     from main import Sakamoto
 
 logger = logging.getLogger(__name__)
+
+
+def _youtube_dl(options: dict[str, Any]) -> Any:
+    """Load yt-dlp only when a source lookup runs in the worker thread."""
+    from yt_dlp import YoutubeDL
+
+    return YoutubeDL(options)
 
 
 class MusicControls(View):
@@ -250,7 +256,7 @@ class MusicCog(commands.Cog):
             "noplaylist": not is_url,
             "playlistend": 50,
         }
-        with YoutubeDL(cast(Any, options)) as youtube_dl_client:
+        with _youtube_dl(options) as youtube_dl_client:
             info = cast(
                 dict,
                 youtube_dl_client.extract_info(
