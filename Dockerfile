@@ -1,4 +1,4 @@
-FROM python:3.15.2-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /usr/src/app
 
@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir pipenv
 COPY Pipfile Pipfile.lock ./
 RUN pipenv requirements --hash > requirements.txt
 
-FROM python:3.15.2-slim
+FROM python:3.14-slim
 
 # Keep unbuffered if want more logs, keep buffered if want more performance
 ENV PYTHONDONTWRITEBYTECODE=1 \

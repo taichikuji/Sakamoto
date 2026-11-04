@@ -25,9 +25,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ANILIST_URL = "https://graphql.anilist.co"
-type MediaType = Literal["ANIME", "MANGA"]
-type SearchType = MediaType | Literal["CHARACTER", "USER"]
-type CacheKey = tuple[str, str | frozendict[str, str | int | None]]
+MediaType = Literal["ANIME", "MANGA"]
+SearchType = Literal[MediaType, "CHARACTER", "USER"]
 
 # ANILIST REQUEST POLICY
 # AniList is a shared, rate-limited service currently operating with reduced capacity.
@@ -579,7 +578,9 @@ class AniListCog(
 
     def __init__(self, bot: Sakamoto) -> None:
         self.bot = bot
-        self.search_cache: dict[CacheKey, tuple[float, list[dict[str, Any]]]] = {}
+        self.search_cache: dict[
+            tuple[str, str], tuple[float, list[dict[str, Any]]]
+        ] = {}
         self.search_lock = Lock()
         self.autocomplete_lock = Lock()
 
@@ -595,7 +596,7 @@ class AniListCog(
 
     def _store_cache(
         self,
-        key: CacheKey,
+        key: tuple[str, str],
         results: list[dict[str, Any]],
         *,
         expires_at: float | None = None,
@@ -641,13 +642,8 @@ class AniListCog(
         genre = " ".join(genre.split()) if genre else None
         if season is not None and year is None:
             year = datetime.now(UTC).year
-        filters = frozendict(
-            year=year,
-            genre=genre.casefold() if genre else None,
-            season=season,
-            format=media_format,
-        )
-        key = (f"TOP_{media_type}", filters)
+        filters = (year, genre.casefold() if genre else None, season, media_format)
+        key = (f"TOP_{media_type}", repr(filters))
         if (cached := self.search_cache.get(key)) and cached[0] > monotonic():
             return cached[1], True
 
@@ -697,7 +693,6 @@ class AniListCog(
             ) in self.search_cache.items():
                 if (
                     result_type == search_type
-                    and isinstance(result_query, str)
                     and expires_at > now
                     and normalized.startswith(result_query)
                     and len(result_query) > len(cached_query)

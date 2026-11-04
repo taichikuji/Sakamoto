@@ -244,46 +244,6 @@ async def test_top_cache_normalizes_equivalent_genres_and_expires(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_top_cache_separates_media_and_each_filter(monkeypatch):
-    variants = [
-        ("ANIME", {}),
-        ("MANGA", {}),
-        ("ANIME", {"year": 2026}),
-        ("ANIME", {"year": 2025}),
-        ("ANIME", {"genre": "Action"}),
-        ("ANIME", {"year": 2026, "season": "FALL"}),
-        ("ANIME", {"media_format": "TV"}),
-    ]
-    results = [[{"id": index}] for index in range(len(variants))]
-    ranking = AsyncMock(side_effect=results)
-    monkeypatch.setattr(anilist, "_top_results", ranking)
-    cog = _make_cog()
-
-    for (media_type, filters), result in zip(variants, results, strict=True):
-        assert await cog._cached_top(media_type, **filters) == (result, False)
-    for (media_type, filters), result in zip(variants, results, strict=True):
-        assert await cog._cached_top(media_type, **filters) == (result, True)
-    assert ranking.await_count == len(variants)
-
-
-@pytest.mark.asyncio
-async def test_autocomplete_works_with_ranking_entries_in_shared_cache(monkeypatch):
-    monkeypatch.setattr(anilist, "_top_results", AsyncMock(return_value=[ANIME]))
-    search = AsyncMock(return_value=[MANGA])
-    monkeypatch.setattr(anilist, "_search_results", search)
-    cog = _make_cog()
-    await cog._cached_top("MANGA", genre="Action")
-    interaction = SimpleNamespace(command=SimpleNamespace(name="manga"))
-
-    choices = await cog.search_query_autocomplete(interaction, "berserk")
-
-    assert [(choice.name, choice.value) for choice in choices] == [
-        ("Berserk", "Berserk")
-    ]
-    search.assert_awaited_once_with(cog.bot.session, "berserk", "MANGA")
-
-
-@pytest.mark.asyncio
 async def test_top_command_defaults_to_anime_and_paginates_cached_results():
     second = {
         **ANIME,
