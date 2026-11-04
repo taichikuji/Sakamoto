@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import sys
 from collections import deque
 from pathlib import Path
@@ -47,6 +48,26 @@ def test_play_option_contracts():
     ] == [
         ("query", True, True),
     ]
+
+
+def test_music_defers_ytdlp_import_until_source_lookup():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from extensions.audio import music
+
+assert "yt_dlp" not in sys.modules
+with music._youtube_dl({"quiet": True}):
+    assert "yt_dlp" in sys.modules
+""",
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+        timeout=30,
+    )
 
 
 @pytest.mark.asyncio
@@ -923,7 +944,7 @@ def test_search_source_resolves_one_full_search_result(monkeypatch):
         {"entries": []},
     ]
     youtube_dl = MagicMock(return_value=ydl)
-    monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
+    monkeypatch.setattr("extensions.audio.music._youtube_dl", youtube_dl)
     cog = MusicCog(_make_bot())
 
     assert cog.search_source("track") == {
@@ -963,7 +984,7 @@ def test_search_source_preserves_extraction_errors_and_flat_playlists(monkeypatc
         ydl.add_info_extractor(OfflineIE())
         return ydl
 
-    monkeypatch.setattr("extensions.audio.music.YoutubeDL", youtube_dl)
+    monkeypatch.setattr("extensions.audio.music._youtube_dl", youtube_dl)
     cog = MusicCog(_make_bot())
 
     for query in ("unavailable", unavailable_url):
