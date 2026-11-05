@@ -31,7 +31,7 @@ from extensions.community.redirect import ReplaceCog
         ),
         (
             "photo https://instagram.com/p/abc?stkn=123",
-            "photo https://kirkstagram.com/p/abc?stkn=123",
+            "photo https://oginstagram.com/p/abc?stkn=123",
         ),
     ],
 )
