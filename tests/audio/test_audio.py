@@ -403,6 +403,50 @@ async def test_request_during_stream_refresh_is_queued(monkeypatch, playlist):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("amount", [1, 2])
+async def test_skip_during_stream_refresh_is_rejected_without_changing_queue(
+    monkeypatch, amount
+):
+    cog = MusicCog(_make_bot())
+    channel = object()
+    voice = DummyVoiceClient(channel=channel)
+    queued = [QueueItem("two", "Second", "1:00"), QueueItem("three", "Third", "1:00")]
+    session = _add_session(cog.engine, voice, queue=queued)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh(_url):
+        started.set()
+        await _wait_for_event(release)
+        return "stream"
+
+    source = MagicMock()
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
+    monkeypatch.setattr("extensions.audio._audio_engine.Member", DummyMember)
+    item = QueueItem("one", "First", "1:00", refresh_stream=refresh)
+    pending = asyncio.create_task(cog.engine.play_song(1, item))
+    interaction = _make_interaction(
+        user=DummyMember(42, voice_channel=channel), command_name="skip"
+    )
+    try:
+        await _wait_for_event(started)
+        await MusicCog.skip.callback(cog, interaction, amount=amount)
+
+        interaction.response.send_message.assert_awaited_once_with(
+            ":x: Nothing is currently playing.", ephemeral=True
+        )
+        assert interaction.command_failed is True
+        voice.stop.assert_not_called()
+        source.assert_not_called()
+        assert tuple(session.queue) == tuple(queued)
+    finally:
+        release.set()
+        assert await pending is True
+
+    assert session.current is item
+    voice.play.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_audio_thread_advances_once_and_ignores_previous_track(monkeypatch):
     bot = _make_bot()
     bot.loop = asyncio.get_running_loop()
