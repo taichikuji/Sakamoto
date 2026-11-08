@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from discord import app_commands
+from discord import HTTPException, app_commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -59,6 +59,76 @@ async def test_command_tree_dispatches_failures_without_awaiting_analytics(
 
     bot.dispatch.assert_called_once_with("app_command_failure", interaction, command)
     base_handler.assert_awaited_once_with(interaction, error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deferred", [False, True])
+async def test_command_tree_sends_safe_ephemeral_error(main_module, deferred):
+    async def broken(interaction):
+        pass
+
+    command = app_commands.Command(name="broken", description="Test", callback=broken)
+    interaction = SimpleNamespace(
+        command=command,
+        response=SimpleNamespace(is_done=lambda: deferred, send_message=AsyncMock()),
+        followup=SimpleNamespace(send=AsyncMock()),
+    )
+    bot = main_module.Sakamoto()
+    bot.dispatch = MagicMock()
+    error = app_commands.CommandInvokeError(command, RuntimeError("private details"))
+
+    await bot.tree.on_error(interaction, error)
+
+    sender = (
+        interaction.followup.send if deferred else interaction.response.send_message
+    )
+    sender.assert_awaited_once_with(
+        ":x: Something went wrong running this command. Please try again.",
+        ephemeral=True,
+    )
+    bot.dispatch.assert_called_once_with("app_command_failure", interaction, command)
+
+
+@pytest.mark.asyncio
+async def test_command_tree_leaves_locally_handled_errors_alone(main_module):
+    @app_commands.command()
+    async def guarded(interaction):
+        """Test command."""
+
+    @guarded.error
+    async def handled(interaction, error):
+        pass
+
+    interaction = SimpleNamespace(
+        command=guarded, response=MagicMock(), followup=MagicMock()
+    )
+    bot = main_module.Sakamoto()
+    bot.dispatch = MagicMock()
+
+    await bot.tree.on_error(interaction, app_commands.CheckFailure())
+
+    interaction.response.assert_not_called()
+    interaction.response.is_done.assert_not_called()
+    interaction.followup.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_command_tree_tolerates_expired_error_response(main_module):
+    interaction = SimpleNamespace(
+        command=None,
+        response=SimpleNamespace(
+            is_done=lambda: False,
+            send_message=AsyncMock(
+                side_effect=HTTPException(
+                    SimpleNamespace(status=404, reason="Not Found"),
+                    "Unknown interaction",
+                )
+            ),
+        ),
+    )
+    await main_module.Sakamoto().tree.on_error(
+        interaction, app_commands.AppCommandError("boom")
+    )
 
 
 @pytest.mark.asyncio

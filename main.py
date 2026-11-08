@@ -4,7 +4,14 @@ from os import environ
 from pathlib import Path
 
 from aiohttp import ClientSession
-from discord import Activity, ActivityType, Intents, Interaction, app_commands
+from discord import (
+    Activity,
+    ActivityType,
+    HTTPException,
+    Intents,
+    Interaction,
+    app_commands,
+)
 from discord.ext import commands
 from discord.utils import setup_logging
 
@@ -27,6 +34,17 @@ class SakamotoCommandTree(app_commands.CommandTree):
         if command := interaction.command:
             self.client.dispatch("app_command_failure", interaction, command)
         await super().on_error(interaction, error)
+        if command is not None and command._has_any_error_handlers():
+            return
+
+        message = ":x: Something went wrong running this command. Please try again."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except HTTPException:
+            logger.warning("Could not send command error response", exc_info=True)
 
 
 class Sakamoto(commands.Bot):
