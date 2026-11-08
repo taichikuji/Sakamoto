@@ -1176,6 +1176,77 @@ async def test_resolve_source_reuses_in_flight_query(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_first", [False, True])
+async def test_cancelled_source_waiter_preserves_shared_lookup(
+    monkeypatch, cancel_first
+):
+    cog = MusicCog(_make_bot())
+    started, release = asyncio.Event(), asyncio.Event()
+    info = {"url": "stream"}
+
+    class LookupLoop:
+        call_later = staticmethod(DummyLoop.call_later)
+        calls = 0
+
+        def run_in_executor(self, *_args):
+            self.calls += 1
+
+            async def lookup():
+                started.set()
+                await _wait_for_event(release)
+                return info
+
+            return asyncio.create_task(lookup())
+
+    loop = LookupLoop()
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", lambda: loop)
+    first = asyncio.create_task(cog.resolve_source("Track"))
+    await _wait_for_event(started)
+    second = asyncio.create_task(cog.resolve_source(" track "))
+    await asyncio.sleep(0)
+    cancelled, survivor = (first, second) if cancel_first else (second, first)
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    release.set()
+
+    assert await survivor == info
+    assert await cog.resolve_source("TRACK") == info
+    assert loop.calls == 1
+    assert cog.source_lookups == {}
+
+
+@pytest.mark.asyncio
+async def test_source_lookup_finishes_and_caches_after_only_waiter_cancels(monkeypatch):
+    cog = MusicCog(_make_bot())
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class LookupLoop:
+        call_later = staticmethod(DummyLoop.call_later)
+
+        def run_in_executor(self, *_args):
+            async def lookup():
+                started.set()
+                await _wait_for_event(release)
+                return {"url": "stream"}
+
+            return asyncio.create_task(lookup())
+
+    monkeypatch.setattr("extensions.audio.music.get_running_loop", LookupLoop)
+    waiter = asyncio.create_task(cog.resolve_source("Track"))
+    await _wait_for_event(started)
+    lookup = cog.source_lookups["track"]
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    release.set()
+    await lookup
+
+    assert cog.source_cache["track"][1] == {"url": "stream"}
+    assert cog.source_lookups == {}
+
+
+@pytest.mark.asyncio
 async def test_resolve_source_clears_failed_in_flight_lookup(monkeypatch):
     cog = MusicCog(_make_bot())
     cog.search_source = MagicMock(side_effect=RuntimeError("lookup failed"))

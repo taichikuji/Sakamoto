@@ -1,5 +1,5 @@
 import logging
-from asyncio import Future, TimerHandle, gather, get_running_loop
+from asyncio import Future, TimerHandle, create_task, gather, get_running_loop, shield
 from time import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -297,15 +297,20 @@ class MusicCog(commands.Cog):
         if (cached := self.source_cache.get(key)) and cached[0] > time():
             return cached[1]
 
-        if lookup := self.source_lookups.get(key):
-            return await lookup
+        if (lookup := self.source_lookups.get(key)) is None:
+            lookup = create_task(self._lookup_source(query, key, is_url))
+            self.source_lookups[key] = lookup
 
-        lookup = get_running_loop().run_in_executor(None, self.search_source, query)
-        self.source_lookups[key] = lookup
-        try:
-            info = await lookup
-        finally:
-            self.source_lookups.pop(key, None)
+            def finished(task):
+                self.source_lookups.pop(key, None)
+                if not task.cancelled():
+                    task.exception()  # Observe failures even if all callers cancelled.
+
+            lookup.add_done_callback(finished)
+        return await shield(lookup)
+
+    async def _lookup_source(self, query: str, key: str, is_url: bool) -> dict:
+        info = await get_running_loop().run_in_executor(None, self.search_source, query)
         is_playlist = is_url and info.get("_type") in [
             "playlist",
             "multi_video",
