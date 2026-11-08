@@ -26,6 +26,7 @@ class LoaderCog(commands.Cog):
     @app_commands.check(is_application_owner)
     async def load(self, interaction: Interaction, extension: str) -> None:
         """Load a bot extension."""
+        await interaction.response.defer(ephemeral=True)
         try:
             await self.bot.load_extension(f"extensions.{extension}")
             logger.info(
@@ -46,16 +47,19 @@ class LoaderCog(commands.Cog):
             description = f":x: Extension '{extension}' failed to load due to an error."
         except commands.NoEntryPointError:
             description = f":x: Extension '{extension}' does not have a setup function."
-        except Exception as e:
-            description = f":x: An unexpected error occurred: {e}"
-            logger.error(description)
-        await interaction.response.send_message(description, ephemeral=True)
+        except Exception:
+            description = (
+                ":x: An unexpected error occurred while loading the extension."
+            )
+            logger.exception("Could not load extension %s", extension)
+        await interaction.followup.send(description, ephemeral=True)
 
     @app_commands.command(name="unload", description="Unload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
     @app_commands.check(is_application_owner)
     async def unload(self, interaction: Interaction, extension: str) -> None:
         """Unload a bot extension."""
+        await interaction.response.defer(ephemeral=True)
         try:
             await self.bot.unload_extension(f"extensions.{extension}")
             description = (
@@ -63,16 +67,19 @@ class LoaderCog(commands.Cog):
             )
         except commands.ExtensionNotLoaded:
             description = f":information_source: Extension '{extension}' is not loaded."
-        except Exception as e:
-            description = f":x: An unexpected error occurred: {e}"
-            logger.error(description)
-        await interaction.response.send_message(description, ephemeral=True)
+        except Exception:
+            description = (
+                ":x: An unexpected error occurred while unloading the extension."
+            )
+            logger.exception("Could not unload extension %s", extension)
+        await interaction.followup.send(description, ephemeral=True)
 
     @app_commands.command(name="reload", description="Reload an extension.")
     @app_commands.describe(extension="Loaded extension path relative to `extensions.`.")
     @app_commands.check(is_application_owner)
     async def reload(self, interaction: Interaction, extension: str) -> None:
         """Reload a bot extension."""
+        await interaction.response.defer(ephemeral=True)
         try:
             await self.bot.reload_extension(f"extensions.{extension}")
             logger.info(
@@ -93,10 +100,12 @@ class LoaderCog(commands.Cog):
             )
         except commands.NoEntryPointError:
             description = f":x: Extension '{extension}' does not have a setup function."
-        except Exception as e:
-            description = f":x: An unexpected error occurred: {e}"
-            logger.error(description)
-        await interaction.response.send_message(description, ephemeral=True)
+        except Exception:
+            description = (
+                ":x: An unexpected error occurred while reloading the extension."
+            )
+            logger.exception("Could not reload extension %s", extension)
+        await interaction.followup.send(description, ephemeral=True)
 
     @load.error
     @unload.error
