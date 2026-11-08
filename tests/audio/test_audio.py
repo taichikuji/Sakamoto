@@ -282,7 +282,7 @@ async def test_play_song_returns_false_when_refreshed_stream_url_missing(monkeyp
     cog = AudioEngine(_make_bot())
     _add_session(cog, DummyVoiceClient(connected=True))
     cog.play_next = AsyncMock()
-    refresh_stream = AsyncMock(return_value=None)
+    refresh_stream = AsyncMock(return_value=(None, False))
 
     started = await cog.play_song(
         1,
@@ -311,6 +311,34 @@ async def test_play_song_starts_audio_engine_and_tracks_current_song(monkeypatch
     assert started is True
     assert cog.queue_snapshot(1)[0] is item
     assert vc.play.call_args.args[0] == "audio:https://stream.test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata,codec",
+    [
+        ({"extractor_key": "Youtube", "format_id": "251", "acodec": "opus"}, "copy"),
+        ({"extractor_key": "Youtube", "format_id": "140", "acodec": "mp4a.40.2"}, None),
+        ({"extractor_key": "Generic", "format_id": "251", "acodec": "opus"}, None),
+        ({"extractor_key": "Youtube", "format_id": "251"}, None),
+        ({"extractor_key": "Youtube", "acodec": "opus"}, None),
+        ({}, None),
+    ],
+)
+async def test_playback_copies_only_verified_youtube_opus_without_probing(
+    monkeypatch, metadata, codec
+):
+    music = MusicCog(_make_bot())
+    _add_session(music.engine, DummyVoiceClient())
+    source = MagicMock()
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
+    music.resolve_source = AsyncMock()
+    item = music.queue_item({**metadata, "url": "https://stream.test/audio"})
+
+    assert await music.engine.play_song(1, item) is True
+
+    assert source.call_args.kwargs.get("codec") == codec
+    music.resolve_source.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -351,7 +379,7 @@ async def test_stopped_stream_refresh_cannot_touch_reconnected_session(
         await _wait_for_event(release)
         if fails:
             raise RuntimeError("lookup failed")
-        return "stream"
+        return "stream", False
 
     source = MagicMock()
     monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
@@ -382,7 +410,7 @@ async def test_request_during_stream_refresh_is_queued(monkeypatch, playlist):
     async def refresh(_url):
         started.set()
         await _wait_for_event(release)
-        return "stream"
+        return "stream", False
 
     monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", MagicMock())
     pending = asyncio.create_task(
@@ -417,7 +445,7 @@ async def test_skip_during_stream_refresh_is_rejected_without_changing_queue(
     async def refresh(_url):
         started.set()
         await _wait_for_event(release)
-        return "stream"
+        return "stream", False
 
     source = MagicMock()
     monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
@@ -1178,7 +1206,7 @@ async def test_resolve_source_reuses_cached_query_and_stream_url(monkeypatch):
 
     assert await cog.resolve_source("Track") is info
     assert await cog.resolve_source("track") is info
-    assert await cog.refresh_stream_url(source_url) == stream_url
+    assert await cog.refresh_stream(source_url) == (stream_url, False)
     assert "expired" not in cog.source_cache
     cog.search_source.assert_called_once_with("Track")
 
@@ -1342,15 +1370,31 @@ async def test_source_cache_discards_expired_entries_before_valid_entries(monkey
 
 
 @pytest.mark.asyncio
-async def test_resolve_source_refreshes_an_expired_stream_url(monkeypatch):
+async def test_refresh_stream_updates_expired_url_and_codec(monkeypatch):
     cog = MusicCog(_make_bot())
-    expired = {"url": f"https://stream.test/audio?expire={int(time()) - 1}"}
-    fresh = {"url": f"https://stream.test/audio?expire={int(time()) + 3600}"}
+    expired = {
+        "url": f"https://stream.test/audio?expire={int(time()) - 1}",
+        "extractor_key": "Youtube",
+        "format_id": "251",
+        "acodec": "opus",
+    }
+    fresh = {
+        "url": f"https://stream.test/audio?expire={int(time()) + 3600}",
+        "extractor_key": "Youtube",
+        "format_id": "140",
+        "acodec": "mp4a.40.2",
+    }
     cog.search_source = MagicMock(side_effect=[expired, fresh])
     monkeypatch.setattr("extensions.audio.music.get_running_loop", ImmediateLoop)
 
-    assert await cog.resolve_source("https://example.test/track") is expired
-    assert await cog.resolve_source("https://example.test/track") is fresh
+    assert await cog.refresh_stream("https://example.test/track") == (
+        expired["url"],
+        True,
+    )
+    assert await cog.refresh_stream("https://example.test/track") == (
+        fresh["url"],
+        False,
+    )
     assert cog.search_source.call_count == 2
 
 
@@ -1504,22 +1548,24 @@ async def test_automatic_media_announcement_is_safe():
 
 
 @pytest.mark.asyncio
-async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch):
+@pytest.mark.parametrize("copy_opus", [False, True])
+async def test_queued_track_refreshes_stream_url_and_codec_before_audio_engine(
+    monkeypatch, copy_opus
+):
     vc = DummyVoiceClient(connected=True, playing=True)
     cog = AudioEngine(_make_bot())
     session = _add_session(cog, vc)
     followup = AsyncMock()
-    refresh_stream = AsyncMock(return_value="https://stream.test/fresh")
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.FFmpegOpusAudio",
-        lambda stream_url, **_kw: f"audio:{stream_url}",
-    )
+    refresh_stream = AsyncMock(return_value=("https://stream.test/fresh", copy_opus))
+    source = MagicMock(side_effect=lambda stream_url, **_kw: f"audio:{stream_url}")
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
     item = QueueItem(
         "https://youtube.test/watch?v=abc",
         "Track",
         "3:00",
         "https://stream.test/stale",
         refresh_stream,
+        copy_opus=not copy_opus,
     )
 
     await cog.enqueue_or_play(
@@ -1536,6 +1582,7 @@ async def test_queued_track_refreshes_stream_url_before_audio_engine(monkeypatch
 
     refresh_stream.assert_awaited_once_with("https://youtube.test/watch?v=abc")
     assert vc.play.call_args.args[0] == "audio:https://stream.test/fresh"
+    assert source.call_args.kwargs["codec"] == ("copy" if copy_opus else None)
 
 
 @pytest.mark.asyncio
@@ -1748,7 +1795,13 @@ async def test_play_next_cleans_state_when_voice_disconnected():
 
 
 def test_search_source_retains_only_playback_metadata(monkeypatch):
-    track = {"title": "Track", "url": "stream", "duration": 60}
+    track = {
+        "title": "Track",
+        "url": "stream",
+        "duration": 60,
+        "acodec": "opus",
+        "format_id": "251",
+    }
     raw = {
         "entries": [
             None,

@@ -280,6 +280,8 @@ class MusicCog(commands.Cog):
             "title",
             "duration",
             "duration_string",
+            "acodec",
+            "format_id",
         )
         result = {key: info[key] for key in fields if key in info}
         if "entries" in info:
@@ -344,9 +346,10 @@ class MusicCog(commands.Cog):
                 delay, self._expire_sources
             )
 
-    async def refresh_stream_url(self, source_url: str) -> str | None:
+    async def refresh_stream(self, source_url: str) -> tuple[str | None, bool]:
         info = await self.resolve_source(source_url)
-        return self._first_track(info).get("url")
+        item = self.queue_item(self._first_track(info), requested_url=source_url)
+        return item.stream_url, item.copy_opus
 
     def stream_valid_until(self, stream_url: str) -> float:
         raw_expiry = (parse_qs(urlparse(stream_url).query).get("expire") or [None])[0]
@@ -410,7 +413,13 @@ class MusicCog(commands.Cog):
             duration=track_info.get("duration_string")
             or self._format_duration(track_info.get("duration")),
             stream_url=track_info.get("url"),
-            refresh_stream=self.refresh_stream_url,
+            refresh_stream=self.refresh_stream,
+            # Other Opus formats may use packets longer than Discord's 20 ms.
+            copy_opus=(
+                track_info.get("extractor_key") == "Youtube"
+                and track_info.get("format_id") == "251"
+                and track_info.get("acodec") == "opus"
+            ),
         )
 
     def playlist_items(self, entries: list[dict]) -> list[QueueItem]:

@@ -41,6 +41,7 @@ Pending Temporary Rejoin Bans persist in SQLite so their cleanup survives a bot 
 ## Music runtime behavior
 
 - yt-dlp resolves media outside the event loop; only compact playback metadata is cached, with a 256-entry cap and automatic expiry.
+- Confirmed YouTube format 251 Opus audio is copied without re-encoding. Other formats and radio keep transcoding: Opus alone does not establish the 20 ms packet duration Discord expects. Queued refreshes update the stream URL and copy eligibility together.
 - FFmpeg runs as a child process during playback and exits when playback stops; disconnect cleanup removes the guild's Playback Session and clears its queue, current track, and command channel.
 - Repeated extraction and playback can leave the process at a higher RSS plateau after live objects are released because Python and glibc may retain freed pages. Stable elevated RSS alone does not establish a live-object leak.
 

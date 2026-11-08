@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-StreamResolver = Callable[[str], Awaitable[str | None]]
+StreamResolver = Callable[[str], Awaitable[tuple[str | None, bool]]]
 
 
 @dataclass
@@ -34,6 +34,7 @@ class QueueItem:
     duration: str
     stream_url: str | None = None
     refresh_stream: StreamResolver | None = None
+    copy_opus: bool = False
 
 
 @dataclass
@@ -293,10 +294,10 @@ class AudioEngine:
         session.playback_id += 1
         playback_id = session.playback_id
         session.current = item
-        stream_url = item.stream_url
+        stream_url, copy_opus = item.stream_url, item.copy_opus
         if not stream_url and item.refresh_stream is not None:
             try:
-                stream_url = await item.refresh_stream(item.source_url)
+                stream_url, copy_opus = await item.refresh_stream(item.source_url)
             except Exception as error:
                 logger.error("Could not refresh URL for %s: %s", item.title, error)
                 await self.play_next(guild_id, session, playback_id, error)
@@ -324,6 +325,7 @@ class AudioEngine:
         try:
             source = FFmpegOpusAudio(
                 stream_url,
+                codec="copy" if copy_opus else None,
                 before_options=(
                     "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
                     "-analyzeduration 10M -probesize 10M -err_detect ignore_err"
