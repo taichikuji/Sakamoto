@@ -44,6 +44,7 @@ class PlaybackSession:
     queue: deque[QueueItem] = field(default_factory=deque)
     current: QueueItem | None = None
     command_channel: Messageable | None = None
+    playback_id: int = 0
 
 
 class AudioEngine:
@@ -108,7 +109,12 @@ class AudioEngine:
 
         voice_client = session.voice_client
         title = escape_markdown(item.title)
-        if voice_client.is_playing() or voice_client.is_paused() or session.queue:
+        if (
+            session.current
+            or voice_client.is_playing()
+            or voice_client.is_paused()
+            or session.queue
+        ):
             if len(session.queue) >= 50:
                 await followup(":x: Queue is full (50 items).", ephemeral=True)
                 return False
@@ -161,7 +167,11 @@ class AudioEngine:
 
         session.queue.extend(added_items)
         voice_client = session.voice_client
-        if not voice_client.is_playing() and not voice_client.is_paused():
+        if (
+            session.current is None
+            and not voice_client.is_playing()
+            and not voice_client.is_paused()
+        ):
             first = session.queue.popleft()
             if await self.play_song(guild_id, first):
                 title = escape_markdown(first.title)
@@ -272,20 +282,6 @@ class AudioEngine:
         return voice_client
 
     async def play_song(self, guild_id: int, item: QueueItem) -> bool:
-        stream_url = item.stream_url
-        if not stream_url and item.refresh_stream is not None:
-            try:
-                stream_url = await item.refresh_stream(item.source_url)
-            except Exception as error:
-                logger.error("Could not refresh URL for %s: %s", item.title, error)
-                self.play_next(guild_id)
-                return False
-
-        if not stream_url:
-            logger.error("No playable stream URL found for %s", item.title)
-            self.play_next(guild_id)
-            return False
-
         session = self.sessions.get(guild_id)
         if session is None or not session.voice_client.is_connected():
             logger.warning(
@@ -294,7 +290,36 @@ class AudioEngine:
             await self.disconnect_and_cleanup(guild_id)
             return False
 
+        session.playback_id += 1
+        playback_id = session.playback_id
         session.current = item
+        stream_url = item.stream_url
+        if not stream_url and item.refresh_stream is not None:
+            try:
+                stream_url = await item.refresh_stream(item.source_url)
+            except Exception as error:
+                logger.error("Could not refresh URL for %s: %s", item.title, error)
+                await self.play_next(guild_id, session, playback_id, error)
+                return False
+
+        if (
+            self.sessions.get(guild_id) is not session
+            or session.playback_id != playback_id
+        ):
+            return False
+
+        if not stream_url:
+            logger.error("No playable stream URL found for %s", item.title)
+            await self.play_next(guild_id, session, playback_id)
+            return False
+
+        if not session.voice_client.is_connected():
+            logger.warning(
+                "Voice client disappeared before playback in guild %s", guild_id
+            )
+            await self.disconnect_and_cleanup(guild_id)
+            return False
+
         source = None
         try:
             source = FFmpegOpusAudio(
@@ -305,16 +330,21 @@ class AudioEngine:
                 ),
                 options="-vn",
             )
-            session.voice_client.play(
-                source,
-                after=lambda error: self.play_next(guild_id, error),
-            )
+
+            def after(error):
+                if not self.bot.loop.is_closed():
+                    run_coroutine_threadsafe(
+                        self.play_next(guild_id, session, playback_id, error),
+                        self.bot.loop,
+                    )
+
+            session.voice_client.play(source, after=after)
             return True
         except Exception as error:
             if source is not None:
                 source.cleanup()
             logger.error("Playback failed to start in guild %s: %s", guild_id, error)
-            self.play_next(guild_id, error)
+            await self.play_next(guild_id, session, playback_id, error)
             return False
 
     async def disconnect_and_cleanup(self, guild_id: int) -> None:
@@ -332,28 +362,29 @@ class AudioEngine:
                     "Error during disconnect for guild %s: %s", guild_id, error
                 )
 
-    def play_next(self, guild_id: int, error=None) -> None:
+    async def play_next(
+        self, guild_id: int, session: PlaybackSession, playback_id: int, error=None
+    ) -> None:
+        # Audio callbacks can arrive after stop, reconnect, or another track starts.
+        if (
+            self.sessions.get(guild_id) is not session
+            or session.playback_id != playback_id
+        ):
+            return
+        session.playback_id += 1
         if error:
             logger.error("Player error for guild %s: %s", guild_id, error)
 
-        session = self.sessions.get(guild_id)
-        if session is None:
-            return
         if not session.voice_client.is_connected():
-            run_coroutine_threadsafe(
-                self.disconnect_and_cleanup(guild_id), self.bot.loop
-            )
+            await self.disconnect_and_cleanup(guild_id)
             return
 
         if session.queue:
             item = session.queue.popleft()
-            run_coroutine_threadsafe(
-                self.play_next_track_and_announce(guild_id, item), self.bot.loop
-            )
+            await self.play_next_track_and_announce(guild_id, item)
             return
 
-        session.current = None
-        run_coroutine_threadsafe(self.disconnect_and_cleanup(guild_id), self.bot.loop)
+        await self.disconnect_and_cleanup(guild_id)
 
     async def handle_voice_state_update(
         self, member: Member, before: VoiceState, after: VoiceState

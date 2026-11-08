@@ -281,7 +281,7 @@ def test_skip_amount_has_minimum_of_one():
 async def test_play_song_returns_false_when_refreshed_stream_url_missing(monkeypatch):
     cog = AudioEngine(_make_bot())
     _add_session(cog, DummyVoiceClient(connected=True))
-    cog.play_next = MagicMock()
+    cog.play_next = AsyncMock()
     refresh_stream = AsyncMock(return_value=None)
 
     started = await cog.play_song(
@@ -290,7 +290,7 @@ async def test_play_song_returns_false_when_refreshed_stream_url_missing(monkeyp
     )
 
     assert started is False
-    cog.play_next.assert_called_once_with(1)
+    cog.play_next.assert_awaited_once_with(1, cog.sessions[1], 1)
 
 
 @pytest.mark.asyncio
@@ -314,13 +314,132 @@ async def test_play_song_starts_audio_engine_and_tracks_current_song(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_old_audio_callback_cannot_advance_reconnected_session(monkeypatch):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    engine = AudioEngine(bot)
+    old_voice = DummyVoiceClient()
+    _add_session(engine, old_voice)
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", MagicMock())
+    await engine.play_song(1, QueueItem("old", "Old", "1:00", "stream"))
+    after = old_voice.play.call_args.kwargs["after"]
+    await engine.disconnect_and_cleanup(1)
+    replacement = _add_session(
+        engine, DummyVoiceClient(), queue=[QueueItem("new", "New", "1:00")]
+    )
+
+    await asyncio.to_thread(after, None)
+    await asyncio.sleep(0)
+
+    assert engine.sessions[1] is replacement
+    assert len(replacement.queue) == 1
+    replacement.voice_client.disconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_stopped_stream_refresh_cannot_touch_reconnected_session(
+    monkeypatch, fails
+):
+    engine = AudioEngine(_make_bot())
+    old_voice = DummyVoiceClient()
+    _add_session(engine, old_voice)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh(_url):
+        started.set()
+        await _wait_for_event(release)
+        if fails:
+            raise RuntimeError("lookup failed")
+        return "stream"
+
+    source = MagicMock()
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", source)
+    pending = asyncio.create_task(
+        engine.play_song(1, QueueItem("old", "Old", "1:00", refresh_stream=refresh))
+    )
+    await _wait_for_event(started)
+    await engine.disconnect_and_cleanup(1)
+    replacement = _add_session(
+        engine, DummyVoiceClient(), queue=[QueueItem("new", "New", "1:00")]
+    )
+    release.set()
+
+    assert await pending is False
+    assert engine.sessions[1] is replacement
+    assert len(replacement.queue) == 1
+    source.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("playlist", [False, True])
+async def test_request_during_stream_refresh_is_queued(monkeypatch, playlist):
+    engine = AudioEngine(_make_bot())
+    voice = DummyVoiceClient()
+    session = _add_session(engine, voice)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh(_url):
+        started.set()
+        await _wait_for_event(release)
+        return "stream"
+
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", MagicMock())
+    pending = asyncio.create_task(
+        engine.play_song(1, QueueItem("one", "First", "1:00", refresh_stream=refresh))
+    )
+    await _wait_for_event(started)
+    second = QueueItem("two", "Second", "1:00", "stream")
+    try:
+        if playlist:
+            assert await engine.enqueue_playlist(1, [second], AsyncMock()) is True
+        else:
+            assert await engine.enqueue_or_play(1, second, AsyncMock()) is True
+        assert tuple(session.queue) == (second,)
+    finally:
+        release.set()
+        await pending
+    voice.play.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_audio_thread_advances_once_and_ignores_previous_track(monkeypatch):
+    bot = _make_bot()
+    bot.loop = asyncio.get_running_loop()
+    engine = AudioEngine(bot)
+    voice = DummyVoiceClient()
+    second = QueueItem("two", "Second", "1:00", "stream")
+    session = _add_session(engine, voice, queue=[second])
+    advanced = asyncio.Event()
+
+    def played(*_args, **_kwargs):
+        assert asyncio.get_running_loop() is bot.loop
+        if voice.play.call_count == 2:
+            advanced.set()
+
+    voice.play.side_effect = played
+    monkeypatch.setattr("extensions.audio._audio_engine.FFmpegOpusAudio", MagicMock())
+    await engine.play_song(1, QueueItem("one", "First", "1:00", "stream"))
+    after = voice.play.call_args.kwargs["after"]
+
+    await asyncio.to_thread(after, None)
+    await _wait_for_event(advanced)
+    await asyncio.to_thread(after, None)
+    await asyncio.sleep(0)
+
+    assert voice.play.call_count == 2
+    assert session.current is second
+    voice.disconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_play_song_cleans_source_when_audio_engine_is_rejected(monkeypatch):
     source = SimpleNamespace(cleanup=MagicMock())
     vc = DummyVoiceClient(connected=True)
     vc.play.side_effect = RuntimeError("rejected")
     cog = AudioEngine(_make_bot())
     _add_session(cog, vc)
-    cog.play_next = MagicMock()
+    cog.play_next = AsyncMock()
     monkeypatch.setattr(
         "extensions.audio._audio_engine.FFmpegOpusAudio",
         lambda *_args, **_kwargs: source,
@@ -391,17 +510,14 @@ async def test_control_commands_return_early_when_same_channel_check_fails(comma
     )
 
 
-def test_play_next_returns_without_voice_client(monkeypatch):
+@pytest.mark.asyncio
+async def test_play_next_returns_without_voice_client():
     cog = AudioEngine(_make_bot())
-    schedule = MagicMock(side_effect=lambda coro, _loop: coro.close())
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe",
-        schedule,
-    )
+    session = PlaybackSession(DummyVoiceClient())
 
-    cog.play_next(123)
+    await cog.play_next(123, session, 0)
 
-    schedule.assert_not_called()
+    session.voice_client.disconnect.assert_not_awaited()
     assert cog.sessions == {}
 
 
@@ -1489,46 +1605,29 @@ async def test_disconnect_and_cleanup_stops_disconnected_player():
 
 
 @pytest.mark.asyncio
-async def test_play_next_pulls_from_queue(monkeypatch):
+async def test_play_next_pulls_from_queue():
     cog = AudioEngine(_make_bot())
     item = QueueItem("url", "title", "3:00")
-    _add_session(cog, DummyVoiceClient(connected=True), queue=[item])
+    session = _add_session(cog, DummyVoiceClient(connected=True), queue=[item])
     cog.play_next_track_and_announce = AsyncMock()
-    scheduled = []
-
-    def fake_run(coro, _loop):
-        scheduled.append(coro)
-
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
-    )
-    cog.play_next(1)
-    await scheduled[0]
+    await cog.play_next(1, session, 0)
+    await cog.play_next(1, session, 0)
 
     cog.play_next_track_and_announce.assert_awaited_once_with(1, item)
     assert cog.queue_snapshot(1)[1] == ()
 
 
 @pytest.mark.asyncio
-async def test_play_next_cleans_state_when_voice_disconnected(monkeypatch):
+async def test_play_next_cleans_state_when_voice_disconnected():
     cog = AudioEngine(_make_bot())
-    _add_session(
+    session = _add_session(
         cog,
         DummyVoiceClient(connected=False),
         queue=[QueueItem("u", "t", "d")],
         current=QueueItem("u", "t", "d"),
         command_channel=object(),
     )
-    scheduled = []
-
-    def fake_run(coro, _loop):
-        scheduled.append(coro)
-
-    monkeypatch.setattr(
-        "extensions.audio._audio_engine.run_coroutine_threadsafe", fake_run
-    )
-    cog.play_next(1)
-    await scheduled[0]
+    await cog.play_next(1, session, 0)
 
     assert cog.sessions == {}
 
