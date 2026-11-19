@@ -78,7 +78,8 @@ class HelpCog(commands.Cog):
                             command.description,
                             *(
                                 f"`{command_usage(subcommand)}` — {subcommand.description}"
-                                for subcommand in command.commands
+                                for subcommand in command.walk_commands()
+                                if isinstance(subcommand, app_commands.Command)
                             ),
                         )
                     )
@@ -116,7 +117,8 @@ class HelpCog(commands.Cog):
                 name="Subcommands",
                 value="\n".join(
                     f"`{command_usage(subcommand)}` — {subcommand.description}"
-                    for subcommand in command.commands
+                    for subcommand in command.walk_commands()
+                    if isinstance(subcommand, app_commands.Command)
                 ),
                 inline=False,
             )
