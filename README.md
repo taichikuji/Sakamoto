@@ -1,6 +1,6 @@
 # Sakamoto
 
-Sakamoto is a Python Discord bot inspired by the *Nichijou* character. Has modularity, administrative tools, and even voice features. Intended for small-to-medium servers and communities.
+Sakamoto is a self-hosted Python Discord bot inspired by the *Nichijou* character. Designed for small-to-medium communities, it combines music playback, Radio Garden stations, temporary voice lobbies, moderation, and social-link redirects.
 
 This project has come a long way. Originally called Miia-Py, then Ui-Py.
 
