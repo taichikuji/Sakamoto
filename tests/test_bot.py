@@ -1,8 +1,9 @@
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from discord import Message
 from discord.ext import commands
 from discord.utils import async_all
 
@@ -29,12 +30,64 @@ async def test_bot_starts_without_steam_and_exposes_core_commands(
         assert not await bot.tree.interaction_check(SimpleNamespace(guild_id=None))
 
         help_command = bot.tree.get_command("help")
+        original_message = Mock(spec=Message)
+        button_message = SimpleNamespace(edit=AsyncMock())
         interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
+            message=button_message,
+            user=SimpleNamespace(id=1),
+            response=SimpleNamespace(
+                send_message=AsyncMock(
+                    return_value=SimpleNamespace(resource=original_message)
+                ),
+                edit_message=AsyncMock(),
+            ),
         )
         await help_command.callback(help_command.binding, interaction)
-        embed = interaction.response.send_message.call_args.kwargs["embed"]
-        fields = {field.name: field.value for field in embed.fields}
+        idle_view = interaction.response.send_message.await_args.kwargs["view"]
+        await idle_view.on_timeout()
+        assert all(button.disabled for button in idle_view.children)
+        original_message.edit.assert_awaited_once_with(view=idle_view)
+
+        await help_command.callback(help_command.binding, interaction)
+        first = interaction.response.send_message.call_args.kwargs
+        embed, view = first["embed"], first["view"]
+        assert await view.interaction_check(interaction)
+        other_user = SimpleNamespace(
+            user=SimpleNamespace(id=2),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        assert not await view.interaction_check(other_user)
+        assert other_user.response.send_message.await_args.kwargs["ephemeral"]
+        previous, next_page = view.children
+        assert previous.disabled
+        fields = {}
+        pages = []
+        expected_page_count = len(range(0, len(bot.tree.get_commands()), 5))
+        for page_number in range(1, expected_page_count + 1):
+            if page_number > 1:
+                assert not next_page.disabled
+                await next_page.callback(interaction)
+                edit = interaction.response.edit_message.await_args.kwargs
+                assert edit["view"] is view
+                embed = edit["embed"]
+            assert embed.footer.text == f"Page {page_number} of {expected_page_count}"
+            assert len(embed.fields) <= 5
+            assert len(embed) <= 6000
+            pages.append(embed)
+            for field in embed.fields:
+                assert len(field.value) <= 1024
+                assert field.name not in fields
+                fields[field.name] = field.value
+        assert next_page.disabled
+        for page in reversed(pages[:-1]):
+            assert not previous.disabled
+            await previous.callback(interaction)
+            assert interaction.response.edit_message.await_args.kwargs["embed"] is page
+            assert not next_page.disabled
+        assert previous.disabled
+        assert fields.keys() == {
+            f"/{command.name}" for command in bot.tree.get_commands()
+        }
         assert {
             "/play",
             "/queue",
@@ -49,9 +102,15 @@ async def test_bot_starts_without_steam_and_exposes_core_commands(
         } <= fields.keys()
         assert "/honeypot log set" in fields["/honeypot"]
 
+        await view.on_timeout()
+        assert previous.disabled and next_page.disabled
+        button_message.edit.assert_awaited_once_with(view=view)
+
         await help_command.callback(help_command.binding, interaction, "honeypot")
-        embed = interaction.response.send_message.call_args.kwargs["embed"]
-        assert "/honeypot log set" in embed.fields[0].value
+        detail = interaction.response.send_message.await_args.kwargs
+        assert detail["ephemeral"]
+        assert "view" not in detail
+        assert "/honeypot log set" in detail["embed"].fields[0].value
 
         reload_command = bot.tree.get_command("reload")
         interaction.response.defer = AsyncMock()
